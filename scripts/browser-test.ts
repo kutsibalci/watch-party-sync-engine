@@ -358,6 +358,37 @@ try {
     return `A=${ta} B=${tb} Δ=${delta}ms`;
   });
 
+  /**
+   * Oynatma GERÇEKTEN ilerliyor mu?
+   *
+   * iframe'in varlığı yeterli bir kapı DEĞİL. CI runner'larında (veri merkezi
+   * IP'si, ses aygıtı yok, otomatik oynatma politikaları) YouTube gömülü
+   * oynatıcı yükleniyor ama videoyu HİÇ oynatmıyor. Bu durumda sunucu state'i
+   * ilerlerken oynatıcı 0'da kalır ve sapma zamanla doğrusal büyür — testi
+   * "başarısız" saymak yanlış olur, çünkü hata bizim kodumuzda değil.
+   *
+   * Bu yüzden gerçek pozisyonun ilerlediğini ölçüyoruz.
+   */
+  await pageA.bringToFront();
+  const playbackWorks = await pageA
+    .waitForFunction(
+      () => {
+        const t = document.querySelector('#t-actual')?.textContent ?? '';
+        const m = /(\d+):(\d+)\.(\d+)/.exec(t);
+        if (!m) return false;
+        return Number(m[2]) * 1000 + Number(m[3]) > 500;
+      },
+      { timeout: 12_000, polling: 250 },
+    )
+    .then(() => true)
+    .catch(() => false);
+
+  if (!playbackWorks) {
+    skip(
+      'Sekme öne gelince drift düzeltmesi toparlıyor',
+      'ortam videoyu oynatmıyor (CI / veri merkezi IP\'si)',
+    );
+  } else
   await check('Sekme öne gelince drift düzeltmesi toparlıyor', async () => {
     // ARKA PLANDAKİ sekmede tarayıcı video oynatmayı durdurur; sunucu state'i
     // ilerlemeye devam ettiği için sapma saniyelere çıkar. Bu bir hata DEĞİL,
