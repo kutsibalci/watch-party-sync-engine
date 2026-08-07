@@ -156,6 +156,11 @@ try {
       '--autoplay-policy=no-user-gesture-required',
       '--mute-audio',
       '--window-size=1280,900',
+      // Kamera/mikrofon izin penceresi olmadan sahte cihaz ver; WebRTC
+      // testleri gerçek donanım olmadan koşabilsin.
+      '--use-fake-ui-for-media-stream',
+      '--use-fake-device-for-media-stream',
+      '--auto-select-desktop-capture-source=Entire screen',
     ],
     defaultViewport: { width: 1280, height: 900 },
   });
@@ -184,8 +189,11 @@ try {
   });
 
   let slug = '';
-  await check('Sekme A: oda oluşturuluyor', async () => {
+  await check('Sekme A: kaynak seçilip oda oluşturuluyor', async () => {
+    // Oda açmak iki adım: "Devam et" kaynak sayfasını açar, "Odayı aç" kurar.
     await click(pageA, '#btn-create');
+    await pageA.waitForSelector('#source-sheet:not(.is-hidden)', { timeout: 8000 });
+    await click(pageA, '#btn-source-go');
     await pageA.waitForFunction(
       () => (document.querySelector('#room-slug') as HTMLInputElement)?.value.length > 0,
       { timeout: 15_000, polling: 250 },
@@ -444,6 +452,50 @@ try {
       text,
     );
     return 'teslim edildi';
+  });
+
+  await check('Sesli/görüntülü sohbet eşler arasında kuruluyor', async () => {
+    await click(pageA, '#btn-mic');
+    await click(pageA, '#btn-cam');
+
+    // Eş bağlantısı kurulup akış geçene kadar birkaç saniye sürebilir.
+    const arrived = await pageB
+      .waitForFunction(
+        () => {
+          const tiles = Array.from(document.querySelectorAll('#video-strip .tile video'));
+          return tiles.some((v) => {
+            const s = (v as HTMLVideoElement).srcObject as MediaStream | null;
+            return (s?.getTracks().length ?? 0) > 0;
+          });
+        },
+        { timeout: 20_000, polling: 400 },
+      )
+      .then(() => true)
+      .catch(() => false);
+
+    assert(arrived, 'B, A\'nın akışını almadı');
+    const badge = await pageB.$eval('#members', (el) => el.textContent ?? '');
+    assert(badge.includes('🎙'), 'mikrofon rozeti karşı tarafa yansımadı');
+    return 'akış ve rozet karşı tarafta';
+  });
+
+  await check('Ekran paylaşımı karşı tarafta büyük sahnede açılıyor', async () => {
+    await click(pageA, '#btn-screen');
+    const shown = await pageB
+      .waitForFunction(
+        () => {
+          const sv = document.querySelector('#screen-view') as HTMLVideoElement | null;
+          const s = sv?.srcObject as MediaStream | null;
+          return Boolean(sv && !sv.hidden && (s?.getVideoTracks().length ?? 0) > 0);
+        },
+        { timeout: 25_000, polling: 400 },
+      )
+      .then(() => true)
+      .catch(() => false);
+
+    assert(shown, 'ekran paylaşımı B tarafında görünmedi');
+    await click(pageA, '#btn-screen');   // paylaşımı kapat
+    return 'yayın B\'de açıldı';
   });
 
   await check('A kapanınca B host oluyor (leader election)', async () => {

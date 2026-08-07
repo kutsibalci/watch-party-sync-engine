@@ -9,11 +9,12 @@
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════════════════════ GİRİŞ ═══ -->
+<!-- ─────────────────────────────────────────────────────────────── GİRİŞ -->
 <section id="screen-auth" class="screen screen-auth">
-  <div class="auth-art" aria-hidden="true">
-    <div class="glow glow-a"></div>
-    <div class="glow glow-b"></div>
+  <div class="aurora" aria-hidden="true">
+    <span class="blob blob-1"></span>
+    <span class="blob blob-2"></span>
+    <span class="blob blob-3"></span>
   </div>
 
   <div class="auth-panel">
@@ -22,11 +23,17 @@
       <span class="brand-name">Birlikte İzle</span>
     </div>
 
-    <h1>Aynı anda,<br />aynı sahnede.</h1>
+    <h1>Aynı anda,<br /><span class="grad">aynı sahnede.</span></h1>
     <p class="lede">
-      Arkadaşlarınla saniyesi saniyesine senkron izle. Kendi videonu yükle ya da
-      YouTube'dan aç — kim duraklatırsa herkes duraklasın.
+      Arkadaşlarınla saniyesi saniyesine senkron izle. YouTube aç, kendi videonu
+      yükle ya da ekranını paylaş — üstüne sesli ve görüntülü sohbet.
     </p>
+
+    <div class="feat-row">
+      <span class="feat">▶ Senkron oynatma</span>
+      <span class="feat">🎙 Sesli sohbet</span>
+      <span class="feat">🖥 Ekran paylaşımı</span>
+    </div>
 
     <form id="auth-form" class="card auth-card" autocomplete="on">
       <div class="tabs" role="tablist">
@@ -38,27 +45,24 @@
         <span>Görünen ad</span>
         <input id="display-name" type="text" placeholder="Adın" autocomplete="nickname" />
       </label>
-
       <label class="field">
         <span>E-posta</span>
         <input id="email" type="email" placeholder="sen@ornek.com" autocomplete="username" />
       </label>
-
       <label class="field">
         <span>Parola</span>
         <input id="password" type="password" placeholder="En az 8 karakter" autocomplete="current-password" />
       </label>
 
       <button id="btn-register" type="button" class="btn btn-primary btn-block">Hesap oluştur</button>
-      <button id="btn-login" type="button" class="btn btn-ghost btn-block is-hidden">Giriş yap</button>
-
+      <button id="btn-login" type="button" class="btn btn-primary btn-block is-hidden">Giriş yap</button>
       <button id="btn-random" type="button" class="link-quiet">Hızlı deneme hesabı üret</button>
       <p id="auth-status" class="status"></p>
     </form>
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════════ ANA EKRAN ═══ -->
+<!-- ──────────────────────────────────────────────────────────── ANA EKRAN -->
 <section id="screen-home" class="screen is-hidden">
   <header class="topbar">
     <div class="brand brand-sm">
@@ -74,26 +78,28 @@
   </header>
 
   <main class="home">
+    <div class="hero-line">
+      <h1>Ne izleyelim?</h1>
+      <p>Bir oda aç, davet bağlantısını gönder. Kaynağı sonra da değiştirebilirsin.</p>
+    </div>
+
     <div class="home-grid">
-      <div class="card action-card">
+      <div class="card action-card accent-a">
         <div class="card-head">
+          <span class="card-icon">✨</span>
           <h2>Yeni oda aç</h2>
-          <p>Bir YouTube videosuyla başla, sonra istediğin an değiştir.</p>
+          <p>Kaynağı bir sonraki adımda seçeceksin.</p>
         </div>
         <label class="field">
           <span>Oda adı</span>
           <input id="room-name" type="text" value="Film gecesi" />
         </label>
-        <label class="field">
-          <span>YouTube video kimliği</span>
-          <input id="yt-id" type="text" value="aqz-KE-bpKQ" spellcheck="false" />
-          <small>Bağlantıdaki <code>v=</code> sonrası 11 karakter</small>
-        </label>
-        <button id="btn-create" class="btn btn-primary btn-block">Odayı oluştur</button>
+        <button id="btn-create" class="btn btn-primary btn-block">Devam et</button>
       </div>
 
-      <div class="card action-card">
+      <div class="card action-card accent-b">
         <div class="card-head">
+          <span class="card-icon">🔗</span>
           <h2>Odaya katıl</h2>
           <p>Sana gelen davet kodunu ya da bağlantıyı yapıştır.</p>
         </div>
@@ -106,40 +112,102 @@
       </div>
     </div>
 
-    <section class="library">
-      <div class="library-head">
-        <h2>Videolarım</h2>
+    <details class="library-fold">
+      <summary>
+        <span>Video kitaplığım</span>
+        <small id="library-count">—</small>
+      </summary>
+      <div class="library">
         <div class="upload-inline">
           <input id="file-input" type="file" accept="video/*" class="file-input" />
           <label for="file-input" class="btn btn-sm btn-quiet">Dosya seç</label>
           <span id="file-name" class="file-name">seçilmedi</span>
           <button id="btn-upload" class="btn btn-sm">Yükle ve işle</button>
         </div>
+        <div id="upload-progress" class="upload-progress is-hidden">
+          <div class="bar"><div id="progress-fill"></div></div>
+          <span id="progress-label" class="mono"></span>
+        </div>
+        <p id="upload-status" class="status"></p>
+        <ul id="video-list" class="video-list"></ul>
       </div>
-
-      <div id="upload-progress" class="upload-progress is-hidden">
-        <div class="bar"><div id="progress-fill"></div></div>
-        <span id="progress-label" class="mono"></span>
-      </div>
-      <p id="upload-status" class="status"></p>
-
-      <ul id="video-list" class="video-list"></ul>
-    </section>
+    </details>
   </main>
 </section>
 
-<!-- ══════════════════════════════════════════════════════════════ ODA ═══ -->
+<!-- ─────────────────────────────────────────────────────── KAYNAK SEÇİMİ -->
+<div id="source-sheet" class="sheet is-hidden">
+  <div class="sheet-body card wide">
+    <div class="sheet-head">
+      <div>
+        <h3>Ne izleyeceksiniz?</h3>
+        <p class="muted">Sonradan istediğin an değiştirebilirsin.</p>
+      </div>
+      <button id="btn-source-close" class="btn btn-quiet btn-sm">Kapat</button>
+    </div>
+
+    <div class="source-grid">
+      <button class="source-opt is-active" data-source="youtube">
+        <span class="source-icon ico-yt">▶</span>
+        <strong>YouTube</strong>
+        <small>Bağlantı yapıştır, herkes senkron izlesin</small>
+      </button>
+      <button class="source-opt" data-source="library">
+        <span class="source-icon ico-lib">🎞</span>
+        <strong>Kendi videon</strong>
+        <small>Yükle, biz uyarlayalım</small>
+      </button>
+      <button class="source-opt" data-source="screen">
+        <span class="source-icon ico-scr">🖥</span>
+        <strong>Ekran paylaş</strong>
+        <small>Canlı yayınla — tarayıcın, oyunun, sunumun</small>
+      </button>
+    </div>
+
+    <div id="source-youtube" class="source-pane">
+      <label class="field">
+        <span>YouTube bağlantısı veya video kimliği</span>
+        <input id="yt-id" type="text" value="aqz-KE-bpKQ" spellcheck="false"
+               placeholder="https://youtube.com/watch?v=… veya 11 karakterlik kimlik" />
+      </label>
+    </div>
+
+    <div id="source-library" class="source-pane is-hidden">
+      <p class="muted small">Hazır videolarından birini seç:</p>
+      <ul id="source-video-list" class="video-list compact"></ul>
+    </div>
+
+    <div id="source-screen" class="source-pane is-hidden">
+      <p class="muted small">
+        Odaya girdikten sonra <strong>Ekran paylaş</strong> düğmesine bas. Yayın
+        doğrudan tarayıcılar arasında gider, sunucudan geçmez.
+      </p>
+      <p class="note">
+        Ekran paylaşımı canlıdır; ortak zaman çizgisi olmadığı için senkron
+        motoru bu modda devrede değildir.
+      </p>
+    </div>
+
+    <div class="sheet-foot">
+      <p id="source-status" class="status"></p>
+      <button id="btn-source-go" class="btn btn-primary">Odayı aç</button>
+    </div>
+  </div>
+</div>
+
+<!-- ───────────────────────────────────────────────────────────────── ODA -->
 <section id="screen-room" class="screen is-hidden">
   <header class="topbar">
-    <button id="btn-leave" class="btn btn-quiet btn-sm">‹ Odadan çık</button>
+    <button id="btn-leave" class="btn btn-quiet btn-sm">‹ Çık</button>
     <div class="room-title">
       <strong id="room-title">—</strong>
       <span id="room-code" class="mono muted"></span>
     </div>
     <div class="spacer"></div>
     <div id="conn-state" class="pill pill-off">bağlanıyor…</div>
+    <button id="btn-source" class="btn btn-quiet btn-sm">Kaynağı değiştir</button>
     <button id="btn-invite" class="btn btn-primary btn-sm">Davet et</button>
-    <button id="btn-debug" class="btn btn-quiet btn-sm" title="Teknik ayrıntılar">⚙</button>
+    <button id="btn-debug" class="btn btn-quiet btn-sm" title="Senkron ayrıntıları">⚙</button>
   </header>
 
   <main class="room">
@@ -147,6 +215,7 @@
       <div class="stage">
         <div id="player"></div>
         <video id="video" playsinline hidden></video>
+        <video id="screen-view" playsinline autoplay hidden></video>
         <div id="stage-empty" class="stage-empty">
           <span>🎬</span>
           <p>Henüz bir kaynak seçilmedi</p>
@@ -163,15 +232,25 @@
         <span id="source-label" class="chip mono"></span>
         <span id="sync-badge" class="chip chip-ok">senkron</span>
       </div>
+
+      <div class="mediabar">
+        <button id="btn-mic" class="btn btn-media" data-on="false"><span>🎙</span> Mikrofon</button>
+        <button id="btn-cam" class="btn btn-media" data-on="false"><span>📷</span> Kamera</button>
+        <button id="btn-screen" class="btn btn-media" data-on="false"><span>🖥</span> Ekran paylaş</button>
+        <div class="spacer"></div>
+        <span id="media-note" class="muted small"></span>
+      </div>
     </div>
 
     <aside class="side">
       <div class="tabs side-tabs" role="tablist">
         <button class="tab is-active" data-side-tab="chat" role="tab">Sohbet</button>
         <button class="tab" data-side-tab="people" role="tab">
-          Katılımcılar <span id="people-count" class="count">0</span>
+          Kişiler <span id="people-count" class="count">0</span>
         </button>
       </div>
+
+      <div id="video-strip" class="video-strip is-hidden"></div>
 
       <div id="pane-chat" class="pane">
         <div id="chat-log" class="chat-log"></div>
@@ -187,7 +266,6 @@
     </aside>
   </main>
 
-  <!-- Davet -->
   <div id="invite-sheet" class="sheet is-hidden">
     <div class="sheet-body card">
       <div class="sheet-head">
@@ -212,7 +290,6 @@
     </div>
   </div>
 
-  <!-- Teknik çekmece -->
   <div id="debug-drawer" class="drawer is-hidden">
     <div class="drawer-head">
       <strong>Senkron ayrıntıları</strong>

@@ -183,7 +183,7 @@ async function handleConnection(socket: WebSocket, req: FastifyRequest): Promise
   // basittir ve yeniden bağlanmayı tek bir kod yoluna indirger.
   send(socket, {
     type: 'HELLO',
-    you: { userId, displayName },
+    you: { userId, displayName, connectionId: conn.connectionId },
     room: { slug: row.slug, name: row.name },
     state,
     members: await hub.readMembers(slug),
@@ -247,6 +247,24 @@ async function handleConnection(socket: WebSocket, req: FastifyRequest): Promise
         // Sohbet de Redis üzerinden gider — gönderenin instance'ı dahil
         // herkes mesajı kanaldan alır. Tek kod yolu.
         await hub.chat(slug!, { userId, displayName, text: msg.text, atMs: Date.now() });
+        return;
+
+      // Sunucu SDP/ICE içeriğine bakmaz, yalnızca taşır. Gönderen kimliğini
+      // istemciden almıyoruz; kendi bağlantı kimliğini yazıyoruz ki kimse
+      // başkası adına sinyal gönderemesin.
+      case 'RTC_SIGNAL':
+        await hub.relaySignal(slug!, {
+          to: msg.to,
+          from: conn.connectionId,
+          fromName: displayName,
+          payload: msg.payload,
+        });
+        return;
+
+      case 'RTC_MEDIA':
+        await hub.setMedia(slug!, conn.connectionId, {
+          mic: msg.mic, cam: msg.cam, screen: msg.screen,
+        });
         return;
 
       case 'SET_SOURCE': {

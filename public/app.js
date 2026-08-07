@@ -4,7 +4,9 @@ import {
   computeClockSample,
   bestSample,
   decideDriftAction,
+  MAX_MEDIA_PEERS,
 } from '/app/protocol.js';
+import { createMesh } from '/app/rtc.js';
 
 const API = location.origin;
 // Geliştirmede iki realtime instance ayrı portlarda. ?rt=8092 ile ikincisine
@@ -20,6 +22,7 @@ const $ = (id) => document.getElementById(id);
 // ─────────────────────────────────────────────────────────────── Durum
 let token = localStorage.getItem('token') || '';
 let me = null;
+let selfConnectionId = '';
 let slug = '';
 let roomName = '';
 let ws = null;
@@ -240,16 +243,92 @@ $('btn-logout').onclick = () => {
   showScreen('auth');
 };
 
-// ═══════════════════════════════════════════════════════════════ Oda aç
-$('btn-create').onclick = async () => {
+// ═══════════════════════════════════════════════════════════ Kaynak seçimi
+let sourceMode = 'youtube';
+/** Sayfa "oda aç" mı yoksa "mevcut odanın kaynağını değiştir" mi? */
+let sourceIntent = 'create';
+let pickedVideoId = null;
+
+// youtube.com/watch?v=… , youtu.be/… ya da düz kimlik — hepsini kabul et.
+function parseYouTubeId(raw) {
+  const s = (raw || '').trim();
+  if (/^[\w-]{11}$/.test(s)) return s;
+  const m = /(?:v=|youtu\.be\/|embed\/|shorts\/)([\w-]{11})/.exec(s);
+  return m ? m[1] : null;
+}
+
+function openSourceSheet(intent) {
+  sourceIntent = intent;
+  $('btn-source-go').textContent = intent === 'create' ? 'Odayı aç' : 'Kaynağı değiştir';
+  setStatus('source-status', '');
+  void fillSourceLibrary();
+  $('source-sheet').classList.remove('is-hidden');
+}
+
+for (const opt of document.querySelectorAll('[data-source]')) {
+  opt.onclick = () => {
+    sourceMode = opt.getAttribute('data-source');
+    for (const o of document.querySelectorAll('[data-source]')) o.classList.toggle('is-active', o === opt);
+    for (const name of ['youtube', 'library', 'screen']) {
+      $(`source-${name}`).classList.toggle('is-hidden', name !== sourceMode);
+    }
+  };
+}
+
+$('btn-source-close').onclick = () => $('source-sheet').classList.add('is-hidden');
+$('btn-create').onclick = () => openSourceSheet('create');
+$('btn-source').onclick = () => openSourceSheet('change');
+
+async function fillSourceLibrary() {
   try {
-    const { room } = await api('POST', '/api/rooms', {
-      name: $('room-name').value || 'Oda',
-      youtubeVideoId: $('yt-id').value || undefined,
-    });
-    $('room-slug').value = room.slug;
-    await connect(room.slug, room.name);
-  } catch (e) { setStatus('room-status', e.message, 'err'); }
+    const { videos } = await api('GET', '/api/videos');
+    const ready = videos.filter((v) => v.status === 'ready');
+    $('source-video-list').innerHTML = ready.length
+      ? ready.map((v) => `<li><span class="v-title">${escapeHtml(v.title)}</span>
+          <button class="btn btn-sm" data-pick="${v.id}">Seç</button></li>`).join('')
+      : '<li class="empty">Hazır video yok — ana ekrandaki kitaplıktan yükleyebilirsin</li>';
+    for (const b of $('source-video-list').querySelectorAll('[data-pick]')) {
+      b.onclick = () => {
+        pickedVideoId = b.getAttribute('data-pick');
+        for (const x of $('source-video-list').querySelectorAll('[data-pick]')) x.textContent = 'Seç';
+        b.textContent = 'Seçildi ✓';
+      };
+    }
+  } catch { /* oturum yoksa sessiz geç */ }
+}
+
+$('btn-source-go').onclick = async () => {
+  try {
+    if (sourceIntent === 'create') {
+      const ytId = sourceMode === 'youtube' ? parseYouTubeId($('yt-id').value) : null;
+      if (sourceMode === 'youtube' && !ytId) {
+        return setStatus('source-status', 'Geçerli bir YouTube bağlantısı ya da kimliği gir', 'err');
+      }
+      const { room } = await api('POST', '/api/rooms', {
+        name: $('room-name').value || 'Oda',
+        youtubeVideoId: ytId ?? undefined,
+      });
+      $('room-slug').value = room.slug;
+      $('source-sheet').classList.add('is-hidden');
+      await connect(room.slug, room.name);
+      if (sourceMode === 'library' && pickedVideoId) await useVideoInRoom(pickedVideoId);
+      if (sourceMode === 'screen') toast('Hazırsan "Ekran paylaş" düğmesine bas');
+      return;
+    }
+
+    // Mevcut odanın kaynağını değiştir
+    if (sourceMode === 'youtube') {
+      const ytId = parseYouTubeId($('yt-id').value);
+      if (!ytId) return setStatus('source-status', 'Geçerli bir YouTube bağlantısı gir', 'err');
+      sendMsg({ type: 'SET_SOURCE', source: { type: 'youtube', videoId: ytId } });
+    } else if (sourceMode === 'library') {
+      if (!pickedVideoId) return setStatus('source-status', 'Bir video seç', 'err');
+      await useVideoInRoom(pickedVideoId);
+    } else {
+      toast('"Ekran paylaş" düğmesiyle başlatabilirsin');
+    }
+    $('source-sheet').classList.add('is-hidden');
+  } catch (e) { setStatus('source-status', e.message, 'err'); }
 };
 
 $('btn-join').onclick = async () => {
@@ -264,6 +343,12 @@ $('btn-join').onclick = async () => {
 
 $('btn-leave').onclick = () => {
   if (ws) { ws.onclose = null; ws.close(); ws = null; }
+  mesh.closeAll();
+  remotes.clear();
+  media.mic = media.cam = media.screen = false;
+  for (const k of ['mic', 'cam', 'screen']) $(`btn-${k}`).dataset.on = 'false';
+  $('screen-view').hidden = true; $('screen-view').srcObject = null;
+  $('video-strip').classList.add('is-hidden');
   slug = ''; state = null; seenVersion = 0;
   showScreen('home');
 };
@@ -324,6 +409,8 @@ function handleMessage(msg) {
   switch (msg.type) {
     case 'HELLO':
       me = msg.you;
+      selfConnectionId = msg.you.connectionId;
+      mesh.setSelf(selfConnectionId);
       $('room-title').textContent = msg.room.name;
       applyState(msg.state);
       renderMembers(msg.members);
@@ -344,6 +431,11 @@ function handleMessage(msg) {
     case 'CHAT': addChat(msg.displayName, msg.text); break;
     case 'ERROR': addSystem(msg.message); break;
     case 'VIDEO_PROGRESS': onVideoProgress(msg); break;
+
+    case 'RTC_SIGNAL':
+      try { void mesh.handleSignal(msg.from, msg.fromName, JSON.parse(msg.payload)); }
+      catch { /* bozuk sinyal */ }
+      break;
   }
 }
 
@@ -457,15 +549,172 @@ function updateSyncBadge(drift) {
   else { b.textContent = 'yakalanıyor'; b.className = 'chip chip-err'; }
 }
 
+// ═══════════════════════════════════════════════════ Sesli/görüntülü sohbet
+const media = { mic: false, cam: false, screen: false };
+/** connectionId → { name, stream, screen } */
+const remotes = new Map();
+
+/** Son PRESENCE listesi. Akış geldiğinde kimin ne paylaştığını buradan okuyoruz. */
+let lastMembers = [];
+
+const mesh = createMesh({
+  send: (to, data) => sendMsg({ type: 'RTC_SIGNAL', to, payload: JSON.stringify(data) }),
+  onRemote: (peerId, name, stream) => {
+    const prev = remotes.get(peerId);
+    remotes.set(peerId, { name, stream, screen: prev?.screen ?? false });
+    // Akış çoğu zaman PRESENCE'tan SONRA gelir; yönlendirmeyi burada da
+    // yapmazsak ekran paylaşımı karşı tarafta hiç görünmez.
+    routeScreenShare(lastMembers);
+    renderTiles();
+  },
+  onDrop: (peerId) => { remotes.delete(peerId); renderTiles(); },
+  onError: (m) => addSystem(m),
+});
+
+function announceMedia() {
+  sendMsg({ type: 'RTC_MEDIA', mic: media.mic, cam: media.cam, screen: media.screen });
+  for (const k of ['mic', 'cam', 'screen']) {
+    $(`btn-${k}`).dataset.on = String(media[k]);
+  }
+}
+
+/** Mikrofon/kamera durumuna göre yerel akışı yeniden kurar. */
+async function refreshLocalStream() {
+  if (media.screen) return;  // ekran paylaşımı kendi akışını yönetiyor
+
+  if (!media.mic && !media.cam) {
+    await mesh.setLocalStream(null);
+    renderTiles();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: media.mic,
+      video: media.cam ? { width: 640, height: 480 } : false,
+    });
+    await mesh.setLocalStream(stream);
+    renderTiles();
+  } catch (e) {
+    media.mic = false; media.cam = false;
+    announceMedia();
+    addSystem(`Cihaza erişilemedi: ${e.message}`);
+  }
+}
+
+$('btn-mic').onclick = async () => { media.mic = !media.mic; announceMedia(); await refreshLocalStream(); };
+$('btn-cam').onclick = async () => { media.cam = !media.cam; announceMedia(); await refreshLocalStream(); };
+
+$('btn-screen').onclick = async () => {
+  if (media.screen) {
+    media.screen = false;
+    announceMedia();
+    $('screen-view').hidden = true;
+    $('screen-view').srcObject = null;
+    await refreshLocalStream();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: 30 },
+      audio: true,
+    });
+    // Kullanıcı tarayıcının kendi "paylaşımı durdur" düğmesine basabilir.
+    stream.getVideoTracks()[0].onended = () => { if (media.screen) $('btn-screen').click(); };
+
+    media.screen = true;
+    announceMedia();
+    await mesh.setLocalStream(stream);
+    showScreenStage(stream);
+  } catch (e) {
+    if (e.name !== 'NotAllowedError') addSystem(`Ekran paylaşılamadı: ${e.message}`);
+  }
+};
+
+function showScreenStage(stream) {
+  $('stage-empty').classList.add('is-hidden');
+  const el = $('screen-view');
+  el.hidden = false;
+  el.srcObject = stream;
+  el.muted = true;   // kendi ekranını dinlemek yankı yapar
+  void el.play().catch(() => {});
+}
+
+function renderTiles() {
+  const strip = $('video-strip');
+  const entries = [...remotes.entries()].filter(([, r]) => !r.screen);
+  const local = mesh.stream;
+
+  const tiles = [];
+  if (local && (media.cam || media.mic) && !media.screen) {
+    tiles.push({ id: 'self', name: 'Sen', stream: local, muted: true });
+  }
+  for (const [id, r] of entries) tiles.push({ id, name: r.name, stream: r.stream, muted: false });
+
+  strip.classList.toggle('is-hidden', tiles.length === 0);
+  strip.innerHTML = tiles.map((t) => {
+    const hasVideo = t.stream.getVideoTracks().some((tr) => tr.enabled && tr.readyState === 'live');
+    return hasVideo
+      ? `<div class="tile" data-tile="${t.id}">
+           <video autoplay playsinline ${t.muted ? 'muted' : ''}></video>
+           <span class="tile-name">${escapeHtml(t.name)}</span>
+         </div>`
+      : `<div class="tile audio-only" data-tile="${t.id}">
+           <span class="ring">${escapeHtml(initials(t.name))}</span>
+           <span class="tile-name">${escapeHtml(t.name)}</span>
+           <video autoplay playsinline ${t.muted ? 'muted' : ''} style="display:none"></video>
+         </div>`;
+  }).join('');
+
+  for (const t of tiles) {
+    const v = strip.querySelector(`[data-tile="${t.id}"] video`);
+    if (v) v.srcObject = t.stream;
+  }
+}
+
+// Bir eş ekranını paylaşıyorsa akışı karo yerine büyük sahnede göster.
+function routeScreenShare(members) {
+  const sharer = members.find((m) => m.media?.screen && m.connectionId !== selfConnectionId);
+  if (!sharer) {
+    if (!media.screen) { $('screen-view').hidden = true; $('screen-view').srcObject = null; }
+    return;
+  }
+  const r = remotes.get(sharer.connectionId);
+  if (!r) return;
+  r.screen = true;
+  const el = $('screen-view');
+  if (el.srcObject !== r.stream) {
+    $('stage-empty').classList.add('is-hidden');
+    el.hidden = false;
+    el.srcObject = r.stream;
+    el.muted = false;
+    void el.play().catch(() => {});
+  }
+}
+
 // ════════════════════════════════════════════════════════════ Arayüz
 function renderMembers(members) {
+  lastMembers = members;
   $('people-count').textContent = String(members.length);
-  $('members').innerHTML = members.map((m) => `
-    <li>
+  $('members').innerHTML = members.map((m) => {
+    const badges = [
+      m.media?.mic ? '🎙' : '', m.media?.cam ? '📷' : '', m.media?.screen ? '🖥' : '',
+    ].filter(Boolean).join(' ');
+    return `<li>
       <span class="avatar">${escapeHtml(initials(m.displayName))}</span>
       <span>${escapeHtml(m.displayName)}</span>
+      ${badges ? `<span class="member-media">${badges}</span>` : ''}
       ${m.isHost ? '<span class="host-tag">HOST</span>' : ''}
-    </li>`).join('');
+    </li>`;
+  }).join('');
+
+  const peers = members.filter((m) => m.connectionId !== selfConnectionId);
+  mesh.sync(peers);
+  routeScreenShare(members);
+  renderTiles();
+
+  $('media-note').textContent = peers.length >= MAX_MEDIA_PEERS - 1
+    ? `Görüntülü sohbet ${MAX_MEDIA_PEERS} kişiyle sınırlı`
+    : '';
 }
 
 function addChat(who, text) {

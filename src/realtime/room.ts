@@ -5,7 +5,8 @@ import { redis, createSubscriber } from '../shared/redis.ts';
 import { config } from '../shared/config.ts';
 import { createLogger } from '../shared/logger.ts';
 import { wsActiveRooms, wsBroadcastLatency } from '../shared/metrics.ts';
-import type { Member, PlaybackState, ServerMessage, SourceRef } from '../shared/protocol.ts';
+import type { MediaFlags, Member, PlaybackState, ServerMessage, SourceRef } from '../shared/protocol.ts';
+import { NO_MEDIA } from '../shared/protocol.ts';
 import { userChannel, type UserEvent } from '../shared/media.ts';
 
 const log = createLogger('room');
@@ -72,13 +73,17 @@ type MemberEntry = {
   displayName: string;
   joinedAtMs: number;
   instanceId: string;
+  media?: MediaFlags;
 };
 
 /** Kanaldan geçen mesaj zarfı. */
 type Envelope =
   | { kind: 'STATE'; state: PlaybackState; byUserId: string | null; reason: string }
   | { kind: 'PRESENCE' }
-  | { kind: 'CHAT'; userId: string; displayName: string; text: string; atMs: number };
+  | { kind: 'CHAT'; userId: string; displayName: string; text: string; atMs: number }
+  // Eşe yönlendirilmiş WebRTC sinyali. Odadaki herkese yayınlanır ama yalnızca
+  // hedefin bağlı olduğu instance teslim eder; hedef başka instance'ta olabilir.
+  | { kind: 'RTC'; to: string; from: string; fromName: string; payload: string };
 
 // ============================================================== Lua betikleri
 
@@ -340,6 +345,7 @@ class RoomHub {
       displayName: conn.displayName,
       joinedAtMs: conn.joinedAtMs,
       instanceId: config.INSTANCE_ID,
+      media: { ...NO_MEDIA },
     };
 
     await redis
@@ -436,6 +442,29 @@ class RoomHub {
     await redis.publish(K.channel(slug), JSON.stringify({ kind: 'CHAT', ...msg }));
   }
 
+  /** WebRTC sinyalini hedef bağlantıya ulaştırır; hedef başka instance'ta olabilir. */
+  async relaySignal(
+    slug: string,
+    msg: Omit<Extract<Envelope, { kind: 'RTC' }>, 'kind'>,
+  ): Promise<void> {
+    await redis.publish(K.channel(slug), JSON.stringify({ kind: 'RTC', ...msg }));
+  }
+
+  /** Katılımcının açık medya akışlarını günceller ve odaya duyurur. */
+  async setMedia(slug: string, connectionId: string, media: MediaFlags): Promise<void> {
+    const raw = await redis.hget(K.members(slug), connectionId);
+    if (!raw) return;
+    let entry: MemberEntry;
+    try {
+      entry = JSON.parse(raw) as MemberEntry;
+    } catch {
+      return;
+    }
+    entry.media = media;
+    await redis.hset(K.members(slug), connectionId, JSON.stringify(entry));
+    await this.publishPresence(slug);
+  }
+
   private readonly pendingLatency = new Map<string, number>();
 
   private async publishPresence(slug: string): Promise<void> {
@@ -478,6 +507,20 @@ class RoomHub {
         text: env.text,
         atMs: env.atMs,
       });
+      return;
+    }
+
+    // Sinyal yalnızca hedefin bağlı olduğu instance tarafından teslim edilir.
+    if (env.kind === 'RTC') {
+      const target = this.local.get(slug)?.get(env.to);
+      if (target && target.socket.readyState === 1) {
+        target.socket.send(JSON.stringify({
+          type: 'RTC_SIGNAL',
+          from: env.from,
+          fromName: env.fromName,
+          payload: env.payload,
+        } satisfies ServerMessage));
+      }
       return;
     }
 
@@ -579,10 +622,12 @@ class RoomHub {
     );
 
     return entries.map((e, i) => ({
+      connectionId: e.connectionId,
       userId: e.userId,
       displayName: e.displayName,
       isHost: i === 0,
       joinedAtMs: e.joinedAtMs,
+      media: e.media ?? { ...NO_MEDIA },
     }));
   }
 

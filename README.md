@@ -5,10 +5,11 @@
 [![CI](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/Node-24-3c873a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Test](https://img.shields.io/badge/tests-75%20scenarios-3ecf8e)
+![Test](https://img.shields.io/badge/tests-77%20scenarios-3ecf8e)
 
-A real-time synchronisation engine for watching video together, with a transcoding
-pipeline and a horizontally scalable WebSocket layer.
+A real-time synchronisation engine for watching video together: YouTube, your own
+uploads or a shared screen — plus voice and video chat, a transcoding pipeline and
+a horizontally scalable WebSocket layer.
 
 **It does not touch DRM-protected content** — it works on files you upload yourself
 and on YouTube. That is a deliberate scope decision; the reasoning is
@@ -18,7 +19,7 @@ and on YouTube. That is a deliberate scope decision; the reasoning is
 > stateful real-time systems, asynchronous job processing and horizontal scaling
 > **with measured results**.
 
-**Status:** phases 0–4 complete · **75 automated tests** (including a real Chrome test) ·
+**Status:** phases 0–4 complete · **77 automated tests** (including a real Chrome test) ·
 type-check clean · production image runs as a non-root user
 
 <p align="center">
@@ -26,8 +27,8 @@ type-check clean · production image runs as a non-root user
 </p>
 
 <p align="center">
+  <img src="docs/ekran/kaynak-secimi.png" width="49%" alt="Source picker: YouTube, your own video, or screen share" />
   <img src="docs/ekran/giris.png" width="49%" alt="Sign-in" />
-  <img src="docs/ekran/ana-ekran.png" width="49%" alt="Home: create or join a room, your video library" />
 </p>
 ---
 
@@ -497,8 +498,13 @@ scripts/   migration tool + four test suites
 - Redis is a single node. As the instance count grows the `PUBLISH` fan-out grows
   linearly; the next step would be room→instance routing (consistent hashing) or Redis
   Cluster.
-- Voice chat (WebRTC) was left out of scope. Mesh P2P works up to ~5 participants;
-  beyond that an SFU is needed, and that is a separate project.
+- Voice/video chat and screen sharing run over mesh WebRTC, but there is **no TURN
+  server** — only public STUN. Users behind symmetric NAT (corporate networks, some
+  mobile carriers) may fail to connect; a real deployment needs coturn. The mesh is
+  capped at 6 participants; beyond that an SFU is needed.
+- No shared browser (Rabb.it / Hyperbeam style): running a headless browser on the
+  server and streaming it is separate infrastructure with a real cost line. Screen
+  sharing covers the same need at zero server cost.
 - The load test hits its own bottleneck past 2,500 VUs in a single k6 container —
   going higher needs multiple generators.
 

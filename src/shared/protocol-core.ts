@@ -25,12 +25,35 @@ export type PlaybackState = {
   version: number;
 };
 
+/** Bir katılımcının açık olan medya akışları. */
+export type MediaFlags = { mic: boolean; cam: boolean; screen: boolean };
+
 export type Member = {
+  /** Eşler arası bağlantı bunun üzerinden adreslenir; kullanıcı iki sekme açabilir. */
+  connectionId: string;
   userId: string;
   displayName: string;
   isHost: boolean;
   joinedAtMs: number;
+  media: MediaFlags;
 };
+
+export const NO_MEDIA: MediaFlags = { mic: false, cam: false, screen: false };
+
+/**
+ * Mesh WebRTC'de kimin teklif göndereceği deterministik olmalı, yoksa iki
+ * taraf da aynı anda teklif eder ve bağlantı kurulmaz. Kimlik sıralaması
+ * her iki tarafta aynı sonucu verdiği için ek bir anlaşmaya gerek kalmıyor.
+ */
+export function shouldInitiateTo(selfId: string, peerId: string): boolean {
+  return selfId < peerId;
+}
+
+/**
+ * Mesh'te her katılımcı diğer herkese ayrı akış gönderir; yük katılımcı
+ * sayısının karesiyle büyür. Bu sınırın üstünde SFU gerekir.
+ */
+export const MAX_MEDIA_PEERS = 6;
 
 /**
  * Bir state'in verilen sunucu anındaki GERÇEK pozisyonu.

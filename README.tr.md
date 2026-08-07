@@ -5,10 +5,11 @@
 [![CI](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/Node-24-3c873a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Test](https://img.shields.io/badge/test-75%20senaryo-3ecf8e)
+![Test](https://img.shields.io/badge/test-77%20senaryo-3ecf8e)
 
-Arkadaşlarınla aynı anda video izlemeyi sağlayan gerçek zamanlı senkron motoru,
-transkod hattı ve yatay ölçeklenebilir WebSocket katmanı.
+Arkadaşlarınla aynı anda video izlemeyi sağlayan gerçek zamanlı senkron motoru:
+YouTube, kendi yüklediğin videolar veya ekran paylaşımı — üstüne sesli ve
+görüntülü sohbet, transkod hattı ve yatay ölçeklenebilir WebSocket katmanı.
 
 **DRM'li içeriğe dokunmaz** — kendi yüklediğin dosyalar ve YouTube üzerinde
 çalışır. Bu bilinçli bir kapsam kararıdır; gerekçesi
@@ -18,7 +19,7 @@ transkod hattı ve yatay ölçeklenebilir WebSocket katmanı.
 > zamanlı sistemler, asenkron iş işleme ve yatay ölçeklemeyi **ölçülmüş
 > sonuçlarla** göstermek.
 
-**Durum:** Faz 0–4 tamamlandı · **75 otomatik test** (gerçek Chrome testi dahil) ·
+**Durum:** Faz 0–4 tamamlandı · **77 otomatik test** (gerçek Chrome testi dahil) ·
 tip kontrolü temiz · üretim imajı root olmayan kullanıcıyla çalışıyor
 
 <p align="center">
@@ -26,8 +27,8 @@ tip kontrolü temiz · üretim imajı root olmayan kullanıcıyla çalışıyor
 </p>
 
 <p align="center">
+  <img src="docs/ekran/kaynak-secimi.png" width="49%" alt="Kaynak seçimi: YouTube, kendi videon veya ekran paylaşımı" />
   <img src="docs/ekran/giris.png" width="49%" alt="Giriş ekranı" />
-  <img src="docs/ekran/ana-ekran.png" width="49%" alt="Ana ekran: oda aç veya katıl, video kitaplığın" />
 </p>
 ---
 
@@ -493,8 +494,13 @@ scripts/   migration aracı + dört test paketi
 - Tüm bileşenler tek makinede ölçüldü; gerçek dağıtımda ağ gecikmesi eklenir.
 - Redis tek düğüm. Instance sayısı arttıkça `PUBLISH` fan-out'u doğrusal büyür;
   sonraki adım oda→instance yönlendirmesi (consistent hashing) veya Redis Cluster.
-- Sesli sohbet (WebRTC) kapsam dışı bırakıldı. Mesh P2P ≤5 katılımcıya kadar
-  çalışır; ötesinde SFU gerekir ve bu ayrı bir projedir.
+- Sesli/görüntülü sohbet ve ekran paylaşımı mesh WebRTC ile çalışıyor ama
+  **TURN sunucusu yok**, yalnızca genel STUN var. Simetrik NAT arkasındaki
+  kullanıcılar (kurumsal ağlar, bazı mobil operatörler) bağlanamayabilir;
+  gerçek dağıtımda coturn şart. Mesh 6 katılımcıyla sınırlı — ötesi SFU işi.
+- Ortak tarayıcı (Rabb.it/Hyperbeam tarzı) yok: sunucuda headless tarayıcı
+  çalıştırıp yayınlamak ayrı bir altyapı ve ciddi bir maliyet kalemi.
+  Ekran paylaşımı aynı ihtiyacı sıfır sunucu maliyetiyle karşılıyor.
 - Yük testi k6 tek konteynerde 2.500 VU'dan sonra kendi darboğazına giriyor —
   daha yükseği için birden fazla üreteç gerekir.
 

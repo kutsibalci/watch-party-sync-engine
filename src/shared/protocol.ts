@@ -1,48 +1,36 @@
 import { z } from 'zod';
 
 /**
- * WebSocket protokolü — SUNUCU tarafı.
+ * WebSocket protokolü, sunucu tarafı.
  *
- * Saf çekirdek (tipler, sabitler, drift/saat matematiği) `protocol-core.ts`
- * içindedir ve esbuild ile tarayıcıya da servis edilir. Bu dosya onun üstüne
- * çalışma anı DOĞRULAMA şemalarını ekler; şemalar yalnızca sunucuda gerekir
- * çünkü istemci girdisi düşman girdisidir.
+ * Saf çekirdek protocol-core.ts'te ve tarayıcıya da derleniyor. Buradaki
+ * doğrulama şemaları yalnızca sunucuda gerekli: istemci girdisi güvenilmez.
  *
- * Tasarımın iki temel kuralı:
- *
- * 1) SUNUCU TEK OTORİTEDİR. İstemci "oynat" diye komut gönderir, kendi
- *    state'ini değiştirmez. Sunucu kabul eder, versiyonu artırır, herkese
- *    yayınlar. İstemci yalnızca sunucudan gelen state'i uygular.
- *
- * 2) HER STATE DEĞİŞİKLİĞİ VERSİYONU ARTIRIR. İstemci, kendi gördüğünden
- *    küçük veya eşit versiyonlu bir STATE alırsa YOKSAYAR. Bu tek kural
- *    iki ayrı problemi çözer:
- *      - ağdan sırasız gelen mesajlar (out-of-order delivery)
- *      - iki kullanıcının aynı anda PAUSE basması (deterministik son-yazan-kazanır)
+ * İki kural protokolün tamamını taşıyor:
+ *  - Otorite sunucudadır. İstemci komut gönderir, kendi durumunu değiştirmez.
+ *  - Her değişiklik sürümü artırır; istemci kendi gördüğünden eski bir durum
+ *    alırsa yoksayar. Sırasız paketler ve eşzamanlı komutlar böyle çözülüyor.
  */
 
 export * from './protocol-core.ts';
-import type { Member, PlaybackState } from './protocol-core.ts';
+import type { MediaFlags, Member, PlaybackState } from './protocol-core.ts';
 
-// ----------------------------------------------------------------- Kaynak
 export const SourceRefSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('youtube'), videoId: z.string().regex(/^[\w-]{11}$/) }),
   z.object({ type: z.literal('hls'), url: z.string().url() }),
 ]);
 
-// -------------------------------------------------------- İstemci → Sunucu
+// ─────────────────────────────────────────────────────── İstemci → Sunucu
 export const ClientMessageSchema = z.discriminatedUnion('type', [
-  /** Saat senkronu. t0 = istemcinin gönderim anı (istemci saati). */
   z.object({ type: z.literal('PING'), t0: z.number() }),
 
   z.object({ type: z.literal('PLAY'), positionMs: z.number().min(0).optional() }),
   z.object({ type: z.literal('PAUSE'), positionMs: z.number().min(0).optional() }),
   z.object({ type: z.literal('SEEK'), positionMs: z.number().min(0) }),
 
-  /** Yalnızca host. Kaynak değişimi state'i sıfırlar. */
+  // Yalnızca host; kaynak değişimi durumu sıfırlar.
   z.object({ type: z.literal('SET_SOURCE'), source: SourceRefSchema }),
 
-  /** İstemcinin kendi sapmasını bildirmesi — metrik ve teşhis için. */
   z.object({
     type: z.literal('HEARTBEAT'),
     positionMs: z.number().min(0),
@@ -50,25 +38,39 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   }),
 
   z.object({ type: z.literal('CHAT'), text: z.string().trim().min(1).max(500) }),
+
+  // WebRTC sinyalleşmesi. Sunucu içeriğe bakmaz, hedef bağlantıya iletir.
+  // 64 KB sınırı SDP için fazlasıyla yeterli ve kanalı kötüye kullanmayı zorlaştırır.
+  z.object({
+    type: z.literal('RTC_SIGNAL'),
+    to: z.string().uuid(),
+    payload: z.string().max(64 * 1024),
+  }),
+
+  z.object({
+    type: z.literal('RTC_MEDIA'),
+    mic: z.boolean(),
+    cam: z.boolean(),
+    screen: z.boolean(),
+  }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
-// -------------------------------------------------------- Sunucu → İstemci
+// ─────────────────────────────────────────────────────── Sunucu → İstemci
 export type ServerMessage =
   | {
       type: 'HELLO';
-      you: { userId: string; displayName: string };
+      you: { userId: string; displayName: string; connectionId: string };
       room: { slug: string; name: string };
       state: PlaybackState;
       members: Member[];
       serverTimeMs: number;
     }
-  /** t1 = sunucu alım anı, t2 = sunucu gönderim anı (ikisi de sunucu saati). */
+  // t1 = sunucu alım anı, t2 = sunucu gönderim anı.
   | { type: 'PONG'; t0: number; t1: number; t2: number }
   | { type: 'STATE'; state: PlaybackState; byUserId: string | null; reason: string }
   | { type: 'PRESENCE'; members: Member[] }
   | { type: 'CHAT'; userId: string; displayName: string; text: string; atMs: number }
-  /** Faz 4: transkod ilerlemesi artık yoklanmıyor, itiliyor. */
   | {
       type: 'VIDEO_PROGRESS';
       videoId: string;
@@ -76,4 +78,6 @@ export type ServerMessage =
       percent: number | null;
       errorMessage?: string;
     }
+  | { type: 'RTC_SIGNAL'; from: string; fromName: string; payload: string }
+  | { type: 'RTC_MEDIA'; connectionId: string; media: MediaFlags }
   | { type: 'ERROR'; code: string; message: string };
