@@ -2,7 +2,7 @@
 # Uygulama servisleriyle birlikte:              docker compose --profile app up
 # Her şeyi verileriyle birlikte sil:            docker compose down -v
 
-name: birlikte-izleme
+name: watch-party
 
 services:
   # ---------------------------------------------------------------- Altyapı
