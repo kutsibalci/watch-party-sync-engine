@@ -36,16 +36,10 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 3s --health-retries 20
 
-      minio:
-        image: bitnami/minio:latest
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-          MINIO_DEFAULT_BUCKETS: media
-        ports: ['9000:9000']
-        options: >-
-          --health-cmd "mc ready local || exit 1"
-          --health-interval 5s --health-timeout 5s --health-retries 30
+      # MinIO burada YOK — bilinçli olarak.
+      # Servis konteynerleri imajın komutunu geçersiz kılamaz; resmi
+      # minio/minio imajı ise `server /data` argümanı olmadan başlamaz.
+      # Aşağıda ayrı bir adımda `docker run` ile başlatılıyor.
 
     env:
       NODE_ENV: test
@@ -83,12 +77,28 @@ jobs:
       - name: ffmpeg kur
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
-      - name: MinIO bucket'ını herkese açık okumaya aç
+      - name: MinIO başlat ve bucket'ı hazırla
         run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest server /data
+
+          # Hazır olana kadar bekle — sağlık ucu MinIO'nun kendi endpoint'i
+          for i in $(seq 1 40); do
+            if curl -sf http://127.0.0.1:9000/minio/health/live > /dev/null; then
+              echo "MinIO hazır"; break
+            fi
+            if [ "$i" = "40" ]; then echo "MinIO ayağa kalkmadı"; docker logs minio; exit 1; fi
+            sleep 2
+          done
+
           curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
           chmod +x /tmp/mc
           /tmp/mc alias set local http://127.0.0.1:9000 minioadmin minioadmin
           /tmp/mc mb --ignore-existing local/media
+          # HLS segmentleri tarayıcıdan anonim çekilebilmeli
           /tmp/mc anonymous set download local/media/public
 
       - name: Migration
@@ -127,7 +137,10 @@ jobs:
 
       - name: Hata durumunda logları göster
         if: failure()
-        run: tail -100 /tmp/api.log /tmp/realtime.log /tmp/realtime2.log /tmp/worker.log
+        run: |
+          tail -100 /tmp/api.log /tmp/realtime.log /tmp/realtime2.log /tmp/worker.log || true
+          echo "----- MinIO -----"
+          docker logs --tail 50 minio || true
 
   docker:
     name: Üretim imajı derleniyor
