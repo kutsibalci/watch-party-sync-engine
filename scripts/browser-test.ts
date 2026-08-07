@@ -212,7 +212,7 @@ try {
 
   await check('Sekme A: WebSocket bağlandı', async () => {
     await pageA.waitForFunction(
-      () => document.querySelector('#conn-state')?.textContent === 'bağlı',
+      () => document.querySelector('#conn-state')?.textContent?.startsWith('bağlı') === true,
       { timeout: 15_000, polling: 250 },
     );
     return 'bağlı';
@@ -238,7 +238,7 @@ try {
     assert(prefilled === slug, `oda kodu ön-doldurulmadı: "${prefilled}"`);
     await click(pageB, '#btn-join');
     await pageB.waitForFunction(
-      () => document.querySelector('#conn-state')?.textContent === 'bağlı',
+      () => document.querySelector('#conn-state')?.textContent?.startsWith('bağlı') === true,
       { timeout: 15_000, polling: 250 },
     );
     return 'bağlandı';

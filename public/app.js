@@ -16,7 +16,17 @@ import {
 } from '/app/protocol.js';
 
 const API = location.origin;
-const WS_BASE = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:8091/ws`;
+
+/**
+ * Hangi realtime instance'ına bağlanılacağı.
+ *
+ * Üretimde önde bir yük dengeleyici olur ve istemci bunu bilmez. Geliştirmede
+ * iki instance ayrı portlarda çalışıyor; `?rt=8092` ile ikincisine bağlanmak,
+ * paylaşılan state'in gerçekten çalıştığını TARAYICIDA göstermeyi sağlıyor:
+ * iki sekme farklı süreçlere bağlıyken bile senkron kalmalı.
+ */
+const RT_PORT = new URLSearchParams(location.search).get('rt') || '8091';
+const WS_BASE = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:${RT_PORT}/ws`;
 
 /**
  * hls.js kurucusu.
@@ -392,10 +402,16 @@ async function connect(roomSlug) {
 
   ws.onopen = () => {
     reconnectAttempt = 0;
-    $('conn-state').textContent = 'bağlı';
+    // Hangi realtime instance'ına bağlı olduğumuzu göster — iki sekme farklı
+    // portlarda açıldığında paylaşılan state'in kanıtı gözle görülür olsun.
+    $('conn-state').textContent = `bağlı · realtime :${RT_PORT}`;
     $('conn-state').className = 'pill pill-on';
     enable('watch-panel');
     $('invite-link').value = `${location.origin}/app/?room=${slug}`;
+    // İkinci realtime instance'ına bağlanan davet linki. Bu linkle açılan
+    // sekme FARKLI bir sürece bağlanır ama aynı odada senkron kalır —
+    // paylaşılan state'in en hızlı gözle görülür kanıtı.
+    $('invite-link-2').value = `${location.origin}/app/?room=${slug}&rt=8092`;
     syncClock(10);
   };
 
