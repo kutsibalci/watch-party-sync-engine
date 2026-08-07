@@ -1,5 +1,10 @@
 # Senkron İzleme Motoru
 
+[![CI](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml)
+![Node](https://img.shields.io/badge/Node-24-3c873a)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
+![Test](https://img.shields.io/badge/test-60%20senaryo-3ecf8e)
+
 Arkadaşlarınla aynı anda video izlemeyi sağlayan gerçek zamanlı senkron motoru,
 transkod hattı ve yatay ölçeklenebilir WebSocket katmanı.
 
