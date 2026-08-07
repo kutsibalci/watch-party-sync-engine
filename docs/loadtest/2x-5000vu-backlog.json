@@ -1,0 +1,26 @@
+{
+  "hedefVU": 5000,
+  "odaSayisi": 250,
+  "instanceSayisi": 2,
+  "maksEszamanliVU": 5000,
+  "yayinGecikmesiMs": {
+    "p50": 17,
+    "p95": 130,
+    "p99": 206,
+    "max": 408,
+    "ornekSayisi": 129936
+  },
+  "helloGecikmesiMs": {
+    "p50": 22,
+    "p95": 9455.95,
+    "p99": 9922.95
+  },
+  "saatRttMs": {
+    "p50": 13,
+    "p95": 105
+  },
+  "teslimOrani": 1,
+  "baglantiHatasi": 6,
+  "alinanMesaj": 2289140,
+  "esiklerGecti": true
+}

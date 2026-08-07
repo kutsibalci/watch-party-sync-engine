@@ -1,0 +1,23 @@
+# Depoda ve çalışma kopyasında satır sonu HER ZAMAN LF.
+#
+# Neden zorluyoruz: kaynak dosyalar Linux container'lara bind-mount ediliyor.
+# Windows'ta CRLF'e dönüşen bir dosya container içinde beklenmedik davranır
+# (özellikle shell script eklenirse anında bozulur). Tek satır sonu kuralı
+# platformlar arası "bende çalışıyordu" sınıfını tamamen kaldırır.
+* text=auto eol=lf
+
+# İkili dosyalar — dokunma
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.mp4 binary
+
+# NOT: `*.ts binary` YAZMAYIN. `.ts` hem TypeScript hem MPEG-TS uzantısıdır ve
+# `binary` makrosu `-diff -merge -text` demektir. Sonradan `text` vermek `diff`
+# özniteliğini GERİ GETİRMEZ — TypeScript dosyalarının farkları GitHub'da
+# görünmez olur. HLS segmentleri zaten depoya girmiyor (object storage'da).
+
+# GitHub dil istatistikleri: üretilen ve veri dosyaları sayılmasın
+docs/loadtest/*.json linguist-generated=true
+package-lock.json linguist-generated=true

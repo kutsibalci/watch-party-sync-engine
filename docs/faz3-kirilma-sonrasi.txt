@@ -1,0 +1,29 @@
+Faz 3 — REDIS PUB/SUB'DAN SONRA: ayni kurulum, ayni test
+=========================================================
+Kurulum: Alice -> realtime-1 (:8091),  Bob -> realtime-2 (:8092), AYNI oda.
+Oda state'i artik REDIS'te; gecisler tek Lua betiginde atomik, yayin Pub/Sub ile.
+
+> birlikte-izleme-platformu@0.1.0 scale-test
+> tsx scripts/scale-test.ts
+
+
+  Faz 3 ölçekleme testi
+  A → ws://127.0.0.1:8091/ws   B → ws://127.0.0.1:8092/ws
+
+  oda: upcit9cktv
+
+  ✓ İki instance da bağlantıyı kabul etti  iki HELLO alındı
+  ✓ Presence instance sınırını AŞIYOR (2 üye görünüyor)  her iki taraf da 2 üye görüyor
+  ✓ Host seçimi instance'lar arasında TUTARLI  host = Alice (iki instance da aynı)
+  ✓ A'nın PLAY komutu B'ye ULAŞIYOR (instance sınırını aşan yayın)  B v2 aldı
+  ✓ Versiyonlar iki instance'ta AYNI  iki taraf da v2
+  ✓ Pozisyonlar yakınsıyor (2 sn oynatma sonrası)  A=2412ms B=2412ms Δ=0.0ms
+  ✓ B'nin SEEK komutu A'ya ulaşıyor (ters yön)  A pozisyonu 55000ms olarak aldı
+  ✓ Sohbet instance sınırını aşıyor  A → B teslim edildi
+  ✓ Eşzamanlı zıt komutlar TEK sonuca varıyor (yarış testi)  10 komut sonrası iki taraf da v13, isPlaying=true
+  ✓ Versiyonlar her iki istemcide de monoton  sırasızlık yok
+  ✓ Host DEVRİ instance sınırını aşıyor  Bob → host (farklı instance)
+  ✓ Yeni host SET_SOURCE gönderebiliyor  yetki devredildi
+
+  12 başarılı, 0 başarısız
+

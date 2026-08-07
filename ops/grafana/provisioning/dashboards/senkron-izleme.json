@@ -1,0 +1,213 @@
+{
+  "uid": "senkron-izleme",
+  "title": "Senkron İzleme — Genel Bakış",
+  "tags": ["watchparty", "realtime"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Gerçek zamanlı katman",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Açık WebSocket bağlantısı (instance başına)",
+      "description": "Yatay ölçeklemenin çalıştığının en doğrudan göstergesi: yük iki instance arasında dağılmalı.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 12, "lineWidth": 2 }, "unit": "short" },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] } },
+      "targets": [
+        {
+          "expr": "ws_active_connections",
+          "legendFormat": "{{instance_id}}{{runtime}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Yayın gecikmesi — komut → odaya yayın",
+      "description": "p50/p95/p99. Kırılma noktası aramanın tamamı p99'dadır; p50 doygunluğu gizler.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 0, "lineWidth": 2 }, "unit": "ms" },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(ws_broadcast_latency_ms_bucket[2m])) by (le))",
+          "legendFormat": "p50", "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(ws_broadcast_latency_ms_bucket[2m])) by (le))",
+          "legendFormat": "p95", "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(ws_broadcast_latency_ms_bucket[2m])) by (le))",
+          "legendFormat": "p99", "refId": "C"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Senkron sapması (sync_drift_ms) — projeye özgü metrik",
+      "description": "İstemcilerin hedef pozisyondan mutlak sapması. Ürünün ASIL kalite göstergesi budur; p95 100 ms altında kalmalı.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 10, "lineWidth": 2 },
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 100 },
+              { "color": "red", "value": 1000 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(sync_drift_ms_bucket[2m])) by (le))",
+          "legendFormat": "p50", "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(sync_drift_ms_bucket[2m])) by (le))",
+          "legendFormat": "p95", "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Bağlantı kurulumu (sunucu tarafı) ve olay döngüsü gecikmesi",
+      "description": "İkisi birlikte okunur: HELLO yavaşken bunlar düşükse darboğaz bizim kodumuzda DEĞİLDİR.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 0, "lineWidth": 2 }, "unit": "ms" },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": ".*olay döngüsü.*" },
+            "properties": [{ "id": "custom.lineStyle", "value": { "dash": [8, 4], "fill": "dash" } }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(ws_join_duration_ms_bucket[2m])) by (le))",
+          "legendFormat": "katılım p95", "refId": "A"
+        },
+        {
+          "expr": "nodejs_eventloop_lag_p99_seconds * 1000",
+          "legendFormat": "olay döngüsü p99 — {{instance_id}}", "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "İş kuyruğu ve transkod",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 }
+    },
+    {
+      "type": "timeseries",
+      "title": "İş sonuçları (dakikada)",
+      "description": "dead > 0 insan gözü ister — dead-letter sessiz olmamalı.",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 25, "lineWidth": 1, "stacking": { "mode": "normal" } } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "dead" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(jobs_processed_total[5m])) by (outcome) * 60",
+          "legendFormat": "{{outcome}}", "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Transkod süresi",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 0, "lineWidth": 2 } }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(transcode_duration_seconds_bucket[10m])) by (le))",
+          "legendFormat": "p95", "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Yeniden deneme (toplam)",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "area", "textMode": "auto" },
+      "targets": [{ "expr": "sum(job_retries_total)", "legendFormat": "retry", "refId": "A" }]
+    },
+    {
+      "type": "row",
+      "title": "HTTP API",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 }
+    },
+    {
+      "type": "timeseries",
+      "title": "İstek gecikmesi (rota bazında p95)",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 26 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 0, "lineWidth": 2 } }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, route))",
+          "legendFormat": "{{route}}", "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "İstek hızı ve hata oranı",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 26 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 15, "lineWidth": 1 } }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total[5m])) by (status)",
+          "legendFormat": "{{status}}", "refId": "A"
+        }
+      ]
+    }
+  ]
+}

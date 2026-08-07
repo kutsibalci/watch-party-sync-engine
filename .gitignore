@@ -1,0 +1,23 @@
+node_modules/
+dist/
+.env
+*.local
+
+# Docker volume yedekleri / geçici çıktılar
+tmp/
+media/
+coverage/
+
+# Editör
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Loglar
+*.log
+npm-debug.log*
+
+# esbuild ile uretilir (npm run build:client)
+public/protocol.js

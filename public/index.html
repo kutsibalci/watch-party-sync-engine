@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Senkron İzleme — Faz 2</title>
+  <link rel="stylesheet" href="/app/style.css" />
+</head>
+<body>
+
+<header>
+  <h1>Senkron İzleme <span class="badge">Faz 2</span></h1>
+  <div id="conn-state" class="pill pill-off">bağlı değil</div>
+</header>
+
+<!-- ------------------------------------------------------------- Giriş -->
+<section id="auth-panel" class="panel">
+  <h2>1 · Giriş</h2>
+  <p class="hint">
+    Aynı odayı iki farklı tarayıcı sekmesinde <strong>farklı kullanıcılarla</strong>
+    açın. Aynı kullanıcıyla iki sekme de çalışır.
+  </p>
+  <div class="row">
+    <input id="email" type="email" placeholder="e-posta" autocomplete="username" />
+    <input id="password" type="password" placeholder="parola (en az 8)" autocomplete="current-password" />
+    <input id="display-name" type="text" placeholder="görünen ad" />
+  </div>
+  <div class="row">
+    <button id="btn-register">Kayıt ol</button>
+    <button id="btn-login" class="secondary">Giriş yap</button>
+    <button id="btn-random" class="ghost">Rastgele kullanıcı üret</button>
+  </div>
+  <div id="auth-status" class="status"></div>
+</section>
+
+<!-- --------------------------------------------------------------- Oda -->
+<section id="room-panel" class="panel disabled">
+  <h2>2 · Oda</h2>
+  <div class="row">
+    <input id="room-name" type="text" placeholder="oda adı" value="Test Odası" />
+    <input id="yt-id" type="text" placeholder="YouTube video ID (11 karakter)" value="aqz-KE-bpKQ" />
+    <button id="btn-create">Oda oluştur</button>
+  </div>
+  <div class="row">
+    <input id="room-slug" type="text" placeholder="oda kodu (davet linkinden)" />
+    <button id="btn-join" class="secondary">Odaya katıl</button>
+  </div>
+  <div id="room-status" class="status"></div>
+</section>
+
+<!-- ------------------------------------------------------- Kendi videon -->
+<section id="upload-panel" class="panel disabled">
+  <h2>3 · Kendi videonu yükle <span class="tag">Faz 2</span></h2>
+  <p class="hint">
+    Dosya <strong>doğrudan storage'a</strong> yüklenir, API sunucusundan geçmez.
+    Ardından worker ffprobe ile doğrular ve çoklu bitrate HLS'e çevirir.
+  </p>
+  <div class="row">
+    <input id="file-input" type="file" accept="video/*" />
+    <button id="btn-upload">Yükle ve işle</button>
+  </div>
+  <div class="progress-wrap">
+    <div class="progress-bar"><div id="progress-fill"></div></div>
+    <span id="progress-label" class="mono">—</span>
+  </div>
+  <div id="upload-status" class="status"></div>
+
+  <h3>Videolarım</h3>
+  <ul id="video-list" class="video-list"></ul>
+</section>
+
+<!-- ------------------------------------------------------------ İzleme -->
+<section id="watch-panel" class="panel disabled">
+  <h2>4 · İzleme</h2>
+
+  <div class="watch-grid">
+    <div>
+      <div id="player-wrap">
+        <div id="player"></div>
+        <video id="video" playsinline hidden></video>
+      </div>
+
+      <div class="row controls">
+        <button id="btn-play">▶ Oynat</button>
+        <button id="btn-pause">⏸ Duraklat</button>
+        <button id="btn-back">⏪ −10s</button>
+        <button id="btn-fwd">⏩ +10s</button>
+        <span id="source-label" class="mono muted"></span>
+      </div>
+
+      <!-- Faz 1'in asıl çıktısı: bu tablo iki sekmede de senkron kalmalı -->
+      <table class="telemetry">
+        <tbody>
+          <tr><th>Oynatıcı</th><td id="t-player">—</td></tr>
+          <tr><th>Sunucu saati farkı (offset)</th><td id="t-offset">—</td></tr>
+          <tr><th>RTT (en iyi örnek)</th><td id="t-rtt">—</td></tr>
+          <tr><th>Hedef pozisyon</th><td id="t-target">—</td></tr>
+          <tr><th>Gerçek pozisyon</th><td id="t-actual">—</td></tr>
+          <tr><th>Sapma (drift)</th><td id="t-drift">—</td></tr>
+          <tr><th>Düzeltme</th><td id="t-action">—</td></tr>
+          <tr><th>State versiyonu</th><td id="t-version">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <aside>
+      <h3>Katılımcılar</h3>
+      <ul id="members" class="members"></ul>
+
+      <h3>Sohbet</h3>
+      <div id="chat-log" class="chat-log"></div>
+      <div class="row">
+        <input id="chat-input" type="text" placeholder="mesaj yaz…" maxlength="500" />
+        <button id="btn-chat">Gönder</button>
+      </div>
+
+      <h3>Davet</h3>
+      <input id="invite-link" type="text" readonly />
+    </aside>
+  </div>
+</section>
+
+<footer>
+  <p>
+    Senkron motoru, saat offset ölçümü ve üç kademeli drift düzeltme:
+    <code>ROADMAP.md §4</code>. Yükleme/transkod hattı: <code>ROADMAP.md §5</code>.
+  </p>
+</footer>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+<script type="module" src="/app/app.js"></script>
+</body>
+</html>

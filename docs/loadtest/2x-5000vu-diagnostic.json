@@ -1,0 +1,35 @@
+{
+  "hedefVU": 5000,
+  "odaSayisi": 250,
+  "instanceSayisi": 2,
+  "maksEszamanliVU": 5000,
+  "yayinGecikmesiMs": {
+    "p50": 23,
+    "p95": 130,
+    "p99": 203,
+    "max": 361,
+    "ornekSayisi": 129899
+  },
+  "helloGecikmesiMs": {
+    "p50": 51,
+    "p95": 9391,
+    "p99": 9928.56
+  },
+  "saatRttMs": {
+    "p50": 18,
+    "p95": 107
+  },
+  "httpIstekMs": {
+    "p50": 3.02,
+    "p95": 7.35,
+    "p99": 25.7,
+    "max": 194.18
+  },
+  "iterasyonMs": {
+    "p95": 66477.88
+  },
+  "teslimOrani": 1,
+  "baglantiHatasi": 3,
+  "alinanMesaj": 2288891,
+  "esiklerGecti": true
+}

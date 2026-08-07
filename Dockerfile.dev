@@ -1,0 +1,27 @@
+# Geliştirme imajı. Kaynak kod bind-mount edilir, tsx watch ile canlı yeniden yükleme yapar.
+# Üretim imajı Faz 4'te ayrıca yazılacak (multi-stage, non-root, sadece prod bağımlılıkları).
+FROM node:24-alpine
+
+# ffmpeg + ffprobe: transkod worker'ı Faz 2'de kullanacak
+RUN apk add --no-cache ffmpeg tini
+
+WORKDIR /app
+
+# Bağımlılık katmanını ayrı tutmak, kaynak değiştiğinde yeniden kurulumu önler
+COPY package.json package-lock.json* ./
+RUN npm install
+
+COPY tsconfig*.json ./
+COPY src ./src
+COPY scripts ./scripts
+COPY migrations ./migrations
+# public/ olmadan API'nin /app/ ucu 404 verir — test istemcisi buradan servis edilir
+COPY public ./public
+
+# Paylaşılan protokolü tarayıcı için derle. Bu adım olmadan istemci
+# /app/protocol.js'i bulamaz ve sayfa hiç açılmaz.
+RUN npm run build:client
+
+# tini: sinyalleri düzgün ilet, zombie süreç bırakma
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["npm", "run", "dev:api"]

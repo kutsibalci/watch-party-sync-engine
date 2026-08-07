@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tip kontrolü + tüm test paketleri
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    # Servisleri GitHub Actions'ın service container'ları olarak veriyoruz;
+    # compose'u CI içinde çalıştırmaktan daha hızlı ve sağlık kontrolü hazır.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: watch
+          POSTGRES_PASSWORD: watch
+          POSTGRES_DB: watchparty
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U watch -d watchparty"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+          MINIO_DEFAULT_BUCKETS: media
+        ports: ['9000:9000']
+        options: >-
+          --health-cmd "mc ready local || exit 1"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+
+    env:
+      NODE_ENV: test
+      LOG_LEVEL: warn
+      DATABASE_URL: postgres://watch:watch@127.0.0.1:5432/watchparty
+      REDIS_URL: redis://127.0.0.1:6379
+      S3_ENDPOINT: http://127.0.0.1:9000
+      S3_PUBLIC_ENDPOINT: http://127.0.0.1:9000
+      S3_BUCKET: media
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      JWT_SECRET: ci-icin-en-az-otuz-iki-karakterlik-gecici-anahtar
+      API_PORT: '8090'
+      REALTIME_PORT: '8091'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Bağımlılıklar
+        run: npm ci --no-audit --no-fund
+
+      - name: Tip kontrolü
+        run: npm run typecheck
+
+      - name: İstemci protokolünü derle
+        run: npm run build:client
+
+      # ffmpeg host'ta gerekli: pipeline testi kaynak videoyu burada üretir ve
+      # worker da CI'da host süreci olarak çalışır.
+      - name: ffmpeg kur
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: MinIO bucket'ını herkese açık okumaya aç
+        run: |
+          curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
+          chmod +x /tmp/mc
+          /tmp/mc alias set local http://127.0.0.1:9000 minioadmin minioadmin
+          /tmp/mc mb --ignore-existing local/media
+          /tmp/mc anonymous set download local/media/public
+
+      - name: Migration
+        run: npm run migrate
+
+      - name: Servisleri başlat
+        run: |
+          npm run dev:api      > /tmp/api.log      2>&1 &
+          npm run dev:realtime > /tmp/realtime.log 2>&1 &
+          npm run dev:worker   > /tmp/worker.log   2>&1 &
+          # İkinci realtime instance'ı — ölçekleme testi için
+          INSTANCE_ID=realtime-2 REALTIME_PORT=8092 \
+            npm run dev:realtime > /tmp/realtime2.log 2>&1 &
+
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8090/readyz > /dev/null \
+            && curl -sf http://127.0.0.1:8091/readyz > /dev/null \
+            && curl -sf http://127.0.0.1:8092/readyz > /dev/null; then
+              echo "servisler hazır"; exit 0
+            fi
+            sleep 2
+          done
+          echo "servisler ayağa kalkmadı"; tail -50 /tmp/*.log; exit 1
+
+      - name: Faz 0 — duman testi
+        run: npm run smoke
+
+      - name: Faz 1 — senkron testi
+        run: npm run sync-test
+
+      - name: Faz 2 — hat testi (kuyruk + transkod)
+        run: npm run pipeline-test
+
+      - name: Faz 3 — ölçekleme testi (iki instance)
+        run: WS_A=ws://127.0.0.1:8091/ws WS_B=ws://127.0.0.1:8092/ws npm run scale-test
+
+      - name: Hata durumunda logları göster
+        if: failure()
+        run: tail -100 /tmp/api.log /tmp/realtime.log /tmp/realtime2.log /tmp/worker.log
+
+  docker:
+    name: Üretim imajı derleniyor
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t senkron-izleme:ci .
+      - name: İmaj root olarak çalışmamalı
+        run: |
+          user=$(docker run --rm --entrypoint sh senkron-izleme:ci -c 'id -un')
+          echo "imaj kullanıcısı: $user"
+          test "$user" = "node"

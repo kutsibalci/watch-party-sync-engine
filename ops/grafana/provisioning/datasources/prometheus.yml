@@ -1,0 +1,23 @@
+apiVersion: 1
+
+# Daha önce OTOMATİK üretilmiş UID ile kaydedilmiş bir datasource varsa
+# (eski bir volume'dan geliyorsa) sabit UID ile çakışır ve Grafana hiç
+# ayağa kalkmaz: "Datasource provisioning error: data source not found".
+# Silme adımı sağlamayı idempotent yapar.
+deleteDatasources:
+  - name: Prometheus
+    orgId: 1
+
+datasources:
+  - name: Prometheus
+    # UID'yi Grafana'nın rastgele üretmesine bırakmıyoruz: pano JSON'u bu
+    # değere referans veriyor. Sabitlemezsek pano her kurulumda "datasource
+    # not found" der.
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: 10s

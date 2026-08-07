@@ -1,0 +1,45 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Servisler Docker içinde çalışıyorsa (docker compose --profile app up)
+  - job_name: api-docker
+    static_configs:
+      - targets: ["api:8090"]
+        labels: { service: api, runtime: docker }
+
+  - job_name: realtime-docker
+    static_configs:
+      - targets: ["realtime:8091"]
+        labels: { service: realtime, instance_id: realtime-1, runtime: docker }
+      - targets: ["realtime-2:8091"]
+        labels: { service: realtime, instance_id: realtime-2, runtime: docker }
+
+  # Worker bir HTTP servisi değil ama metriklerini sunmak zorunda: Prometheus
+  # pull modeliyle çalışır, süreç kendini sunmazsa kuyruk metrikleri hiç
+  # toplanmaz ve panel sessizce boş kalır.
+  - job_name: worker-docker
+    static_configs:
+      - targets: ["worker:8093"]
+        labels: { service: worker, runtime: docker }
+
+  # Servisler host üzerinde çalışıyorsa (npm run dev)
+  - job_name: api-host
+    static_configs:
+      - targets: ["host.docker.internal:8090"]
+        labels: { service: api, runtime: host }
+
+  - job_name: realtime-host
+    static_configs:
+      - targets: ["host.docker.internal:8091"]
+        labels: { service: realtime, runtime: host }
+
+  - job_name: worker-host
+    static_configs:
+      - targets: ["host.docker.internal:8093"]
+        labels: { service: worker, runtime: host }

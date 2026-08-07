@@ -1,0 +1,14 @@
+// Yalnızca tarayıcı testi için. puppeteer'ın page.evaluate() callback'leri
+// sayfanın içinde çalışır, dolayısıyla DOM tiplerine ihtiyaç duyarlar.
+//
+// Bunu ana tsconfig'e eklemiyoruz: DOM lib'i program genelinde açık olsaydı
+// sunucu kodunda `document`, `localStorage`, `alert` gibi globaller geçerli
+// görünür ve yalnızca çalışma anında patlardı.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM"]
+  },
+  "include": ["scripts/browser-test.ts"],
+  "exclude": []
+}

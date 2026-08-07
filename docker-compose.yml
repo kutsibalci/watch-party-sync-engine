@@ -1,0 +1,260 @@
+# Altyapı varsayılan olarak ayağa kalkar:      docker compose up -d
+# Uygulama servisleriyle birlikte:              docker compose --profile app up
+# Her şeyi verileriyle birlikte sil:            docker compose down -v
+
+name: birlikte-izleme
+
+services:
+  # ---------------------------------------------------------------- Altyapı
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: watch
+      POSTGRES_PASSWORD: watch
+      POSTGRES_DB: watchparty
+      # Deterministik sıralama ve hızlı başlangıç
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U watch -d watchparty"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # appendonly: oda state'i kalıcı olsun (geliştirme kolaylığı)
+    command: ["redis-server", "--appendonly", "yes", "--save", ""]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web konsolu
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Tek seferlik: bucket'ı oluşturur ve HLS segmentleri için okuma izni verir
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/media &&
+      mc anonymous set download local/media/public &&
+      echo '[minio-init] bucket hazir: media' "
+    restart: "no"
+
+  # ------------------------------------------------------- Gözlemlenebilirlik
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    extra_hosts:
+      # Host üzerinde `npm run dev` ile çalışan servisleri de kazıyabilmek için
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_USERS_DEFAULT_THEME: dark
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafanadata:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+  # ------------------------------------------------- Uygulama (profile: app)
+  api:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: ["npm", "run", "dev:api"]
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      API_PORT: "8090"
+      DATABASE_URL: postgres://watch:watch@postgres:5432/watchparty
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      # Presigned URL'ler ve HLS adresleri TARAYICIYA gider; 'minio' ismi
+      # tarayıcıdan çözülemez. İmza host'u kapsadığı için sonradan
+      # değiştirilemez — bu yüzden ayrı bir genel adres tutuyoruz.
+      S3_PUBLIC_ENDPOINT: http://127.0.0.1:9000
+      S3_BUCKET: media
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      JWT_SECRET: ${JWT_SECRET:-gelistirme-icin-en-az-32-karakterlik-gecici-anahtar}
+      LOG_LEVEL: debug
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
+      - ./migrations:/app/migrations:ro
+      - ./public:/app/public:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # --- Realtime, İKİ instance (Faz 3) ---
+  #
+  # Neden `--scale realtime=2` değil de iki ayrı servis? Ölçekleme komutuyla
+  # replikalar tek bir DNS adı arkasında toplanır ve hangi istemcinin hangi
+  # instance'a düştüğü RASTGELE olur. Ayrı portlar deterministik: test A'yı
+  # 8091'e, B'yi 8092'ye bağlayıp bölünmeyi her seferinde aynı şekilde üretir.
+  #
+  # Üretimde önlerine bir yük dengeleyici (nginx/traefik) konur; bu değişiklik
+  # uygulama kodunu etkilemez çünkü state artık Redis'te paylaşılıyor.
+  realtime: &realtime-base
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: ["npm", "run", "dev:realtime"]
+    restart: unless-stopped
+    environment: &realtime-env
+      NODE_ENV: development
+      REALTIME_PORT: "8091"
+      INSTANCE_ID: realtime-1
+      DATABASE_URL: postgres://watch:watch@postgres:5432/watchparty
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-gelistirme-icin-en-az-32-karakterlik-gecici-anahtar}
+      # Realtime yalnızca HLS için genel URL üretir — S3 KİMLİK BİLGİSİ ALMAZ.
+      S3_PUBLIC_ENDPOINT: http://127.0.0.1:9000
+      S3_BUCKET: media
+      LOG_LEVEL: debug
+    ports:
+      - "8091:8091"
+    volumes:
+      - ./src:/app/src:ro
+    # Her WebSocket bağlantısı bir dosya tanımlayıcı tüketir. Varsayılan 1024
+    # limiti yük testinde İLK kırılma noktasıdır — sistem kodu değil, işletim
+    # sistemi limiti çöker ve teşhis yanıltıcı olur.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  realtime-2:
+    <<: *realtime-base
+    environment:
+      <<: *realtime-env
+      INSTANCE_ID: realtime-2
+    ports:
+      - "8092:8091"
+
+  worker:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: ["npm", "run", "dev:worker"]
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://watch:watch@postgres:5432/watchparty
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      # Presigned URL'ler ve HLS adresleri TARAYICIYA gider; 'minio' ismi
+      # tarayıcıdan çözülemez. İmza host'u kapsadığı için sonradan
+      # değiştirilemez — bu yüzden ayrı bir genel adres tutuyoruz.
+      S3_PUBLIC_ENDPOINT: http://127.0.0.1:9000
+      S3_BUCKET: media
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      JWT_SECRET: ${JWT_SECRET:-gelistirme-icin-en-az-32-karakterlik-gecici-anahtar}
+      LOG_LEVEL: debug
+      WORKER_METRICS_PORT: "8093"
+    # Worker HTTP servisi değil ama metriklerini sunmak zorunda — Prometheus
+    # pull modeliyle çalışır.
+    ports:
+      - "8093:8093"
+    volumes:
+      - ./src:/app/src:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ------------------------------------------------ Yük testi (profile: load)
+  # Host'a k6 kurmuyoruz. Container compose ağının içinden bağlandığı için
+  # ölçtüğümüz gecikmeye Docker port yayınlama katmanı karışmıyor.
+  k6:
+    profiles: ["load"]
+    image: grafana/k6:latest
+    environment:
+      API_URL: http://api:8090
+      # Varsayılan: iki instance'a eşit dağıt. Tek instance ölçmek için
+      # WS_URLS=ws://realtime:8091/ws verin.
+      WS_URLS: ${K6_WS_URLS:-ws://realtime:8091/ws,ws://realtime-2:8091/ws}
+      TARGET_VUS: ${K6_TARGET_VUS:-600}
+      ROOM_COUNT: ${K6_ROOM_COUNT:-60}
+    volumes:
+      - ./ops/k6:/scripts:ro
+      - ./docs/loadtest:/results
+    # k6 binlerce soket açacak; container'ın dosya tanımlayıcı limitini yükselt.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    depends_on:
+      - api
+      - realtime
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+  promdata:
+  grafanadata:

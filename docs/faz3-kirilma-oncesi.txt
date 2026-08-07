@@ -1,0 +1,37 @@
+Faz 3 — REDIS PUB/SUB'DAN ONCE: iki realtime instance'i arasindaki bolunme
+==========================================================================
+Kurulum: Alice -> realtime-1 (:8091),  Bob -> realtime-2 (:8092), AYNI oda.
+Oda state'i her surecin KENDI BELLEGINDE tutuluyor.
+
+> birlikte-izleme-platformu@0.1.0 scale-test
+> tsx scripts/scale-test.ts
+
+
+  Faz 3 ölçekleme testi
+  A → ws://127.0.0.1:8091/ws   B → ws://127.0.0.1:8092/ws
+
+  oda: s97wevnssb
+
+  ✓ İki instance da bağlantıyı kabul etti  iki HELLO alındı
+  ✗ Presence instance sınırını AŞIYOR (2 üye görünüyor)
+    Alice@realtime-1: "PRESENCE(2)@A" 6000ms içinde gelmedi
+  ✗ Host seçimi instance'lar arasında TUTARLI
+    host ayrıştı: A="Alice" B="Bob"
+  ✗ A'nın PLAY komutu B'ye ULAŞIYOR (instance sınırını aşan yayın)
+    Bob@realtime-2: "STATE(PLAY)@B" 6000ms içinde gelmedi
+  ✗ Versiyonlar iki instance'ta AYNI
+    versiyon ayrıştı: A=v2 B=v1
+  ✗ Pozisyonlar yakınsıyor (2 sn oynatma sonrası)
+    pozisyon farkı 8523.0ms (100ms altı olmalı)
+  ✗ B'nin SEEK komutu A'ya ulaşıyor (ters yön)
+    Alice@realtime-1: "STATE(SEEK)@A" 6000ms içinde gelmedi
+  ✗ Sohbet instance sınırını aşıyor
+    Bob@realtime-2: "CHAT@B" 6000ms içinde gelmedi
+  ✗ Eşzamanlı zıt komutlar TEK sonuca varıyor (yarış testi)
+    isPlaying ayrıştı: A=true B=false
+  ✓ Versiyonlar her iki istemcide de monoton  sırasızlık yok
+  ✓ Host DEVRİ instance sınırını aşıyor  Bob → host (farklı instance)
+  ✓ Yeni host SET_SOURCE gönderebiliyor  yetki devredildi
+
+  4 başarılı, 8 başarısız
+
