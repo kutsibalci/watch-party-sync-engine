@@ -4,11 +4,8 @@
  * Kurulum: A istemcisi 8091'e (realtime-1), B istemcisi 8092'ye (realtime-2)
  * bağlanır. İkisi AYNI odadadır ama FARKLI süreçlerdedir.
  *
- * ┌────────────────────────────────────────────────────────────────────────┐
- * │ Bu test, Faz 3'ün Redis Pub/Sub adımından ÖNCE BAŞARISIZ OLUR.         │
- * │ Öyle olması gerekir: oda state'i süreç belleğindeyken A'nın komutu     │
- * │ B'ye ulaşmaz. Kırılmayı görmeden çözümün ne işe yaradığı anlaşılmaz.   │
- * └────────────────────────────────────────────────────────────────────────┘
+ * Redis Pub/Sub eklenmeden önce bu test başarısız olur: oda durumu süreç
+ * belleğindeyken A'nın komutu B'ye ulaşmaz.
  *
  * Kullanım:  npm run scale-test
  */

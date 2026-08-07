@@ -2,23 +2,10 @@ import { randomBytes, createHash } from 'node:crypto';
 
 import { redis } from './redis.ts';
 
-/**
- * WebSocket bağlantısı için TEK KULLANIMLIK, KISA ÖMÜRLÜ bilet.
- *
- * ┌─ ÇÖZDÜĞÜ PROBLEM ────────────────────────────────────────────────────────┐
- * │ Tarayıcının WebSocket API'si özel HTTP başlığı göndermeye izin vermez;   │
- * │ `Authorization: Bearer` kullanamayız. Faz 1-3'te JWT'yi query string'de  │
- * │ taşıyorduk. Bunun bedeli gerçek:                                         │
- * │   • query string sunucu ve ters proxy erişim loglarına DÜŞER             │
- * │   • tarayıcı geçmişine ve Referer başlığına sızabilir                    │
- * │   • JWT 15 dakika geçerli — sızarsa 15 dakika kullanılabilir             │
- * │                                                                           │
- * │ Bilet bunu üç şekilde daraltır:                                          │
- * │   • 30 saniye yaşar                                                       │
- * │   • BİR KEZ kullanılır (atomik GETDEL)                                   │
- * │   • yalnızca tek bir odaya bağlanma yetkisi taşır                        │
- * └───────────────────────────────────────────────────────────────────────────┘
- */
+// Tarayıcının WebSocket API'si özel başlık göndermeye izin vermediği için
+// sırrı query string'de taşımak zorundayız. Ham JWT yerine 30 saniyelik,
+// tek kullanımlık, tek odaya kilitli bir bilet veriyoruz — loglara düşse bile
+// kısa sürede değersizleşir.
 
 const TTL_SECONDS = 30;
 
@@ -28,7 +15,7 @@ export type TicketPayload = {
   slug: string;
 };
 
-/** Redis'te ham bilet değil, ÖZETİ saklanır — veritabanı sızarsa bilet çalışmaz. */
+// Redis'te ham bilet değil özeti durur.
 function keyFor(ticket: string): string {
   const digest = createHash('sha256').update(ticket).digest('base64url');
   return `wsticket:${digest}`;
@@ -43,12 +30,8 @@ export async function issueTicket(payload: TicketPayload): Promise<{
   return { ticket, expiresInSeconds: TTL_SECONDS };
 }
 
-/**
- * Bileti tüketir. İkinci çağrı null döner.
- *
- * GETDEL atomiktir: "önce GET, sonra DEL" yazsaydık aynı bileti iki bağlantı
- * aynı anda kullanabilirdi. Tek kullanımlık olmasının anlamı kalmazdı.
- */
+// GETDEL atomik: "GET sonra DEL" yazsaydık aynı bileti iki bağlantı
+// aynı anda kullanabilirdi.
 export async function consumeTicket(ticket: string): Promise<TicketPayload | null> {
   const raw = await redis.getdel(keyFor(ticket));
   if (!raw) return null;

@@ -75,28 +75,13 @@ function findChrome(): string {
 /**
  * Tıklamadan önce sekmeyi ÖNE GETİR.
  *
- * ┌─ NEDEN — ölçülerek bulundu ──────────────────────────────────────────────┐
- * │ İki sekme açıkken `page.click()` ARKA PLANDAKİ sekmede sonsuza kadar     │
- * │ asılı kalıyor ("Runtime.callFunctionOn timed out"). Puppeteer tıklamadan │
- * │ önce elementin görünür ve KARARLI olmasını bekler; bu kontrol derleyici  │
- * │ (compositor) kare üretmesine dayanır, arka plan sekmesi ise kare         │
- * │ üretmez.                                                                  │
- * │                                                                            │
- * │ Ölçüm:  tek sayfa + click        → 530 ms  ✓                             │
- * │         iki sayfa + click        → asılı   ✗                             │
- * │         iki sayfa + bringToFront → 1067 ms ✓                             │
- * │                                                                            │
- * │ `--disable-renderer-backgrounding` gibi bayraklar bunu ÇÖZMÜYOR;         │
- * │ denendi ve hiçbir etkisi olmadı.                                          │
- * │                                                                            │
- * │ AYNI KÖKTEN İKİNCİ SORUN: `waitForFunction` varsayılan olarak             │
- * │ `polling: 'raf'` kullanır ve o da arka planda takılır. Bu yüzden          │
- * │ dosyadaki TÜM `waitForFunction` çağrılarına `polling: 250` verildi —      │
- * │ aralık yoklaması arka planda da ilerler (tarayıcı ~1 sn'ye kelepçeler,    │
- * │ saniyeler mertebesindeki zaman aşımlarımız için yeterli).                 │
- * │                                                                            │
- * │ `evaluate()` ve `$eval()` arka planda sorunsuz çalışır.                   │
- * └────────────────────────────────────────────────────────────────────────────┘
+ * İki sekme açıkken page.click() arka plandaki sekmede asılı kalıyor:
+ * Puppeteer tıklamadan önce elementin kararlı olmasını bekler, arka plan
+ * sekmesi ise kare üretmez. Ölçüm: tek sayfa 530 ms, iki sayfa asılı,
+ * bringToFront ile 1067 ms. --disable-renderer-backgrounding çözmüyor.
+ *
+ * Aynı sebeple waitForFunction'ın varsayılan raf yoklaması da takılıyor;
+ * bu dosyadaki tüm çağrılara polling: 250 verildi.
  */
 async function click(page: Page, selector: string): Promise<void> {
   await page.bringToFront();
@@ -194,7 +179,7 @@ try {
   await check('Sekme A: sayfa yükleniyor ve kayıt olunuyor', async () => {
     await setupUser(pageA, APP);
     const status = await readCell(pageA, 'auth-status');
-    assert(status.includes('Giriş yapıldı'), `beklenmeyen durum: ${status}`);
+    assert(status.includes('Hoş geldin'), `beklenmeyen durum: ${status}`);
     return status;
   });
 

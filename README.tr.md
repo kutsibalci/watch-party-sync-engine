@@ -21,6 +21,14 @@ transkod hattı ve yatay ölçeklenebilir WebSocket katmanı.
 **Durum:** Faz 0–4 tamamlandı · **75 otomatik test** (gerçek Chrome testi dahil) ·
 tip kontrolü temiz · üretim imajı root olmayan kullanıcıyla çalışıyor
 
+<p align="center">
+  <img src="docs/ekran/oda.png" alt="İzleme odası: senkron oynatıcı, sohbet ve katılımcılar" width="100%" />
+</p>
+
+<p align="center">
+  <img src="docs/ekran/giris.png" width="49%" alt="Giriş ekranı" />
+  <img src="docs/ekran/ana-ekran.png" width="49%" alt="Ana ekran: oda aç veya katıl, video kitaplığın" />
+</p>
 ---
 
 ## Ölçülmüş sonuçlar

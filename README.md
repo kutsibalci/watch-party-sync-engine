@@ -21,6 +21,14 @@ and on YouTube. That is a deliberate scope decision; the reasoning is
 **Status:** phases 0–4 complete · **75 automated tests** (including a real Chrome test) ·
 type-check clean · production image runs as a non-root user
 
+<p align="center">
+  <img src="docs/ekran/oda.png" alt="Watch room: synced player, chat and participants" width="100%" />
+</p>
+
+<p align="center">
+  <img src="docs/ekran/giris.png" width="49%" alt="Sign-in" />
+  <img src="docs/ekran/ana-ekran.png" width="49%" alt="Home: create or join a room, your video library" />
+</p>
 ---
 
 ## Measured results

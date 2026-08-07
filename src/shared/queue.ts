@@ -8,29 +8,18 @@ import { jobRetriesTotal, jobsProcessedTotal } from './metrics.ts';
 const log = createLogger('queue');
 
 /**
- * Elle yazılmış iş kuyruğu — BullMQ/Celery kullanmıyoruz.
+ * Redis üstünde iş kuyruğu: visibility timeout, idempotency, üstel geri
+ * çekilme ve dead-letter.
  *
- * Amaç bu dört mekanizmayı bizzat kurmak:
- *   1. VISIBILITY TIMEOUT — worker çökerse iş kaybolmaz, süre dolunca döner
- *   2. IDEMPOTENCY        — aynı iş iki kez işlenirse sonuç bozulmaz
- *   3. ÜSTEL GERİ ÇEKİLME — başarısız iş artan gecikmelerle yeniden denenir
- *   4. DEAD-LETTER QUEUE  — tükenen iş sessizce kaybolmaz, incelenmek üzere durur
+ * Teslimat at-least-once. Worker "tamam" demeden çökerse iş görünürlük süresi
+ * dolunca başka bir worker'a gider ve ikinci kez işlenir — bu yüzden işleyici
+ * idempotent olmak zorunda. Transkod öyle: aynı çıktı anahtarlarına yazıp
+ * kaydı aynı sonuca günceller.
  *
- * ┌─ NEDEN EXACTLY-ONCE YOK ─────────────────────────────────────────────┐
- * │ Hiçbir kuyruk "tam olarak bir kez" teslim garantisi veremez. Worker   │
- * │ işi bitirip "tamam" demeden hemen önce çökerse, iş görünürlük süresi  │
- * │ dolduğunda BAŞKA bir worker'a gider ve İKİNCİ KEZ işlenir.            │
- * │                                                                       │
- * │ Doğru model: AT-LEAST-ONCE teslimat + İDEMPOTENT işleyici.            │
- * │ Yani "iki kez çalışmasın" diye uğraşmak yerine, "iki kez çalışırsa    │
- * │ da sonuç aynı olsun" diye yazarız. Bu projede transkod idempotenttir: │
- * │ aynı çıktı anahtarına yazar ve DB'yi aynı sonuca günceller.           │
- * └───────────────────────────────────────────────────────────────────────┘
- *
- * Redis anahtar düzeni (type = 'transcode'):
- *   q:transcode:ready    LIST  — alınmayı bekleyen iş kimlikleri
- *   q:transcode:inflight ZSET  — alınmış işler, skor = görünürlük son tarihi (ms)
- *   q:transcode:delayed  ZSET  — yeniden deneme bekleyenler, skor = uygunluk anı
+ * Anahtarlar (type = 'transcode'):
+ *   q:transcode:ready    LIST  bekleyen iş kimlikleri
+ *   q:transcode:inflight ZSET  alınmış işler, skor = görünürlük son tarihi
+ *   q:transcode:delayed  ZSET  yeniden deneme, skor = uygunluk anı
  */
 
 export type JobRecord = {

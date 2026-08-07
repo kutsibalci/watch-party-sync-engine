@@ -489,20 +489,12 @@ class RoomHub {
   /**
    * Presence yayınlarını BİRLEŞTİRİR (coalescing).
    *
-   * ┌─ NEDEN GEREKLİ — Faz 4 yük testinde bulundu ─────────────────────────┐
-   * │ Naif hâlde her katılım/ayrılma anında PRESENCE yayınlanıyordu ve her  │
-   * │ yayın, ABONE HER INSTANCE'ta şunu tetikliyordu:                       │
-   * │     2 Redis çağrısı (zrangebyscore + hgetall) + odadaki her sokete    │
-   * │     bir gönderim                                                       │
-   * │                                                                         │
-   * │ Maliyet: O(katılım × instance × üye). 5.000 bağlantı 250 odaya        │
-   * │ yayılırken bu ~200.000 gereksiz gönderim demekti ve YENİ bağlantılar  │
-   * │ açlığa düşüyordu — HELLO gecikmesi p95 = 12 saniye.                   │
-   * │                                                                         │
-   * │ Birleştirme ile 250 ms içindeki tüm presence değişimleri TEK yayına   │
-   * │ iniyor. Presence zaten "en son hâli" gösteren bir görünüm; ara         │
-   * │ durumları göndermenin hiçbir değeri yok.                               │
-   * └─────────────────────────────────────────────────────────────────────────┘
+   * Her katılım/ayrılmada tek tek yayın yapmak, abone her instance'ta iki
+   * Redis çağrısı artı odadaki her sokete bir gönderim demekti; maliyet
+   * O(katılım × instance × üye). Yük testinde 5.000 bağlantı 250 odaya
+   * yayılırken yeni bağlantılar açlığa düşüyordu.
+   *
+   * Presence zaten "en son hâl" görünümü — ara durumları göndermenin değeri yok.
    */
   private readonly presenceTimers = new Map<string, NodeJS.Timeout>();
 

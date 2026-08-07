@@ -38,22 +38,12 @@ function sendError(socket: WebSocket, code: string, message: string): void {
 /**
  * Oda satırı önbelleği — Faz 4 yük testinde bulunan darboğazın çözümü.
  *
- * ┌─ NASIL BULUNDU ──────────────────────────────────────────────────────────┐
- * │ 5.000 eşzamanlı bağlantıda yayın gecikmesi iyiydi (p99 = 196 ms) ama     │
- * │ HELLO gecikmesi p95 = 9,6 SANİYEYE çıktı. Yani mevcut bağlantılar        │
- * │ sağlıklıydı, YENİ bağlantılar açlığa düşüyordu — farklı bir darboğaz.    │
- * │                                                                            │
- * │ Sebep: her bağlantı bir Postgres sorgusu yapıyordu ve havuz 10            │
- * │ bağlantıyla sınırlıydı. 5.000 el sıkışma 10 kanaldan sırayla geçiyordu.  │
- * │                                                                            │
- * │ Çözüm: oda satırı bir bağlantı boyunca DEĞİŞMEZ ve odalar arası           │
- * │ paylaşılır. Kısa ömürlü önbellek, sorgu sayısını bağlantı başına birden   │
- * │ oda başına ~15 saniyede bire indiriyor.                                   │
- * │                                                                            │
- * │ NEDEN GÜVENLİ: bu satır yalnızca oda state'i Redis'te İLK kez             │
- * │ oluşturulurken kullanılır. Çalışma anındaki kaynak değişimi (SET_SOURCE)  │
- * │ Redis üzerinden gider, bu satırdan değil.                                 │
- * └────────────────────────────────────────────────────────────────────────────┘
+ * Her bağlantı ayrı bir Postgres sorgusu yapıyordu ve havuz dardı; yoğun
+ * bağlantı akınında el sıkışmalar sıraya giriyordu. Oda satırı bir bağlantı
+ * boyunca değişmez, üstelik aynı odaya gelen herkes için aynıdır.
+ *
+ * Güvenli: bu satır yalnızca oda durumu Redis'te ilk kez oluşturulurken
+ * okunur. Çalışma anındaki kaynak değişimi Redis üzerinden gider.
  */
 const ROOM_CACHE_TTL_MS = 15_000;
 const roomCache = new Map<string, { row: RoomRow | null; expiresAt: number }>();

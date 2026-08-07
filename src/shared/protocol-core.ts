@@ -1,20 +1,10 @@
 /**
- * Protokolün SAF çekirdeği — tipler, sabitler ve yan etkisiz fonksiyonlar.
+ * Protokolün saf çekirdeği: tipler, sabitler, yan etkisiz fonksiyonlar.
  *
- * Bu dosyanın HİÇBİR bağımlılığı yoktur ve olmamalıdır. Sebebi: esbuild ile
- * derlenip tarayıcıya `public/protocol.js` olarak servis ediliyor. zod'u buraya
- * koysaydık ~50 KB doğrulama kütüphanesi istemciye inerdi — istemcinin gelen
- * mesajı doğrulamaya ihtiyacı yok, sunucuya güveniyor.
- *
- * Çalışma anı doğrulama şemaları `protocol.ts` içinde; onları yalnızca sunucu
- * kullanır (istemci girdisi düşman girdisidir, sunucu doğrular).
- *
- * ┌─ NEDEN BU AYRIM VAR ────────────────────────────────────────────────────┐
- * │ Faz 1-3'te `public/app.js` bu sabitleri ve fonksiyonları ELLE           │
- * │ KOPYALIYORDU. İki kopyanın ayrışması an meselesiydi: drift eşiğini      │
- * │ sunucuda değiştirip istemcide unutmak sessiz bir hata üretirdi.         │
- * │ Artık tek kaynak var.                                                    │
- * └──────────────────────────────────────────────────────────────────────────┘
+ * Bağımlılığı yok ve olmamalı — esbuild ile derlenip tarayıcıya
+ * public/protocol.js olarak servis ediliyor. zod buraya girseydi 50 KB'lık
+ * doğrulama kütüphanesi istemciye inerdi; doğrulamayı zaten sunucu yapıyor
+ * (şemalar protocol.ts'te).
  */
 
 // ----------------------------------------------------------------- Kaynak
@@ -68,16 +58,11 @@ export type DriftAction =
   | { action: 'seek'; toMs: number };
 
 /**
- * Üç kademeli drift düzeltme kararı.
+ * Sapmayı kapatma kararı. Her sapmada seek etmek arabelleği boşaltıp videoyu
+ * dondurur; %2'lik hız farkı ise duyulmaz ve 500 ms'yi 25 saniyede kapatır.
  *
- * Doğrudan seek yapmak YANLIŞ cevaptır: her seek arabelleği boşaltır, videoyu
- * dondurur ve deneyimi bozar. %2'lik hız farkı kulakla duyulmaz ama 500ms'lik
- * bir sapmayı 25 saniyede sessizce kapatır.
- *
- * @param targetMs sunucuya göre olması gereken pozisyon
- * @param actualMs oynatıcının gerçek pozisyonu
- * @param canFineTuneRate oynatıcı 1.02 gibi ara hızları kabul ediyor mu?
- *        YouTube etmeyebilir — bu VARSAYILMAZ, çalışma anında ölçülür.
+ * `canFineTuneRate`: YouTube ara hızları kabul etmeyebilir, çağıran taraf bunu
+ * çalışma anında ölçer.
  */
 export function decideDriftAction(
   targetMs: number,
@@ -106,11 +91,9 @@ export function decideDriftAction(
 // ----------------------------------------------------------- Saat senkronu
 export type ClockSample = { offsetMs: number; rttMs: number };
 
-/**
- * NTP'nin temel hesabı.
- *   RTT    = (t3 - t0) - (t2 - t1)      → ağda geçen toplam süre
- *   offset = ((t1 - t0) + (t2 - t3)) / 2 → sunucu saati - istemci saati
- */
+// NTP hesabı:
+//   RTT    = (t3 - t0) - (t2 - t1)
+//   offset = ((t1 - t0) + (t2 - t3)) / 2
 export function computeClockSample(
   t0: number,
   t1: number,
@@ -123,11 +106,8 @@ export function computeClockSample(
   };
 }
 
-/**
- * Örneklerden en iyisini seç: EN DÜŞÜK RTT'li olan.
- * Medyan da kullanılabilir ama en düşük RTT daha doğrudur — o pakette kuyruk
- * gecikmesi en azdır, dolayısıyla offset tahmini en az bulanıktır.
- */
+// Medyan yerine en düşük RTT'li örnek: o pakette kuyruk gecikmesi en az,
+// dolayısıyla offset tahmini en az bulanık.
 export function bestSample(samples: readonly ClockSample[]): ClockSample | null {
   if (samples.length === 0) return null;
   return samples.reduce((best, s) => (s.rttMs < best.rttMs ? s : best));

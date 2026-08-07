@@ -3,157 +3,240 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Senkron İzleme</title>
-  <!-- Gömülü SVG favicon: tarayıcının varsayılan /favicon.ico isteğini
-       ve ondan doğan 404'ü tamamen ortadan kaldırır. Ek ağ isteği yok. -->
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>" />
+  <title>Birlikte İzle</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍿</text></svg>" />
   <link rel="stylesheet" href="/app/style.css" />
 </head>
 <body>
 
-<header>
-  <h1>Senkron İzleme <span class="badge">Faz 2</span></h1>
-  <div id="conn-state" class="pill pill-off">bağlı değil</div>
-</header>
-
-<!-- ------------------------------------------------------------- Giriş -->
-<section id="auth-panel" class="panel">
-  <h2>1 · Giriş</h2>
-  <p class="hint">
-    Aynı odayı iki farklı tarayıcı sekmesinde <strong>farklı kullanıcılarla</strong>
-    açın. Aynı kullanıcıyla iki sekme de çalışır.
-  </p>
-  <div class="row">
-    <input id="email" type="email" placeholder="e-posta" autocomplete="username" />
-    <input id="password" type="password" placeholder="parola (en az 8)" autocomplete="current-password" />
-    <input id="display-name" type="text" placeholder="görünen ad" />
+<!-- ═══════════════════════════════════════════════════════════ GİRİŞ ═══ -->
+<section id="screen-auth" class="screen screen-auth">
+  <div class="auth-art" aria-hidden="true">
+    <div class="glow glow-a"></div>
+    <div class="glow glow-b"></div>
   </div>
-  <div class="row">
-    <button id="btn-register">Kayıt ol</button>
-    <button id="btn-login" class="secondary">Giriş yap</button>
-    <button id="btn-random" class="ghost">Rastgele kullanıcı üret</button>
-  </div>
-  <div id="auth-status" class="status"></div>
-</section>
 
-<!-- --------------------------------------------------------------- Oda -->
-<section id="room-panel" class="panel disabled">
-  <h2>2 · Oda</h2>
-  <div class="row">
-    <input id="room-name" type="text" placeholder="oda adı" value="Test Odası" />
-    <input id="yt-id" type="text" placeholder="YouTube video ID (11 karakter)" value="aqz-KE-bpKQ" />
-    <button id="btn-create">Oda oluştur</button>
-  </div>
-  <div class="row">
-    <input id="room-slug" type="text" placeholder="oda kodu (davet linkinden)" />
-    <button id="btn-join" class="secondary">Odaya katıl</button>
-  </div>
-  <div id="room-status" class="status"></div>
-</section>
-
-<!-- ------------------------------------------------------- Kendi videon -->
-<section id="upload-panel" class="panel disabled">
-  <h2>3 · Kendi videonu yükle <span class="tag">Faz 2</span></h2>
-  <p class="hint">
-    Dosya <strong>doğrudan storage'a</strong> yüklenir, API sunucusundan geçmez.
-    Ardından worker ffprobe ile doğrular ve çoklu bitrate HLS'e çevirir.
-  </p>
-  <div class="row">
-    <input id="file-input" type="file" accept="video/*" />
-    <button id="btn-upload">Yükle ve işle</button>
-  </div>
-  <div class="progress-wrap">
-    <div class="progress-bar"><div id="progress-fill"></div></div>
-    <span id="progress-label" class="mono">—</span>
-  </div>
-  <div id="upload-status" class="status"></div>
-
-  <h3>Videolarım</h3>
-  <ul id="video-list" class="video-list"></ul>
-</section>
-
-<!-- ------------------------------------------------------------ İzleme -->
-<section id="watch-panel" class="panel disabled">
-  <h2>4 · İzleme</h2>
-
-  <div class="watch-grid">
-    <div>
-      <div id="player-wrap">
-        <div id="player"></div>
-        <video id="video" playsinline hidden></video>
-      </div>
-
-      <div class="row controls">
-        <button id="btn-play">▶ Oynat</button>
-        <button id="btn-pause">⏸ Duraklat</button>
-        <button id="btn-back">⏪ −10s</button>
-        <button id="btn-fwd">⏩ +10s</button>
-        <span id="source-label" class="mono muted"></span>
-      </div>
-
-      <!-- Faz 1'in asıl çıktısı: bu tablo iki sekmede de senkron kalmalı -->
-      <table class="telemetry">
-        <tbody>
-          <tr><th>Oynatıcı</th><td id="t-player">—</td></tr>
-          <tr><th>Sunucu saati farkı (offset)</th><td id="t-offset">—</td></tr>
-          <tr><th>RTT (en iyi örnek)</th><td id="t-rtt">—</td></tr>
-          <tr><th>Hedef pozisyon</th><td id="t-target">—</td></tr>
-          <tr><th>Gerçek pozisyon</th><td id="t-actual">—</td></tr>
-          <tr><th>Sapma (drift)</th><td id="t-drift">—</td></tr>
-          <tr><th>Düzeltme</th><td id="t-action">—</td></tr>
-          <tr><th>State versiyonu</th><td id="t-version">—</td></tr>
-        </tbody>
-      </table>
+  <div class="auth-panel">
+    <div class="brand">
+      <span class="brand-mark">🍿</span>
+      <span class="brand-name">Birlikte İzle</span>
     </div>
 
-    <aside>
-      <h3>Katılımcılar</h3>
-      <ul id="members" class="members"></ul>
+    <h1>Aynı anda,<br />aynı sahnede.</h1>
+    <p class="lede">
+      Arkadaşlarınla saniyesi saniyesine senkron izle. Kendi videonu yükle ya da
+      YouTube'dan aç — kim duraklatırsa herkes duraklasın.
+    </p>
 
-      <h3>Sohbet</h3>
-      <div id="chat-log" class="chat-log"></div>
-      <div class="row">
-        <input id="chat-input" type="text" placeholder="mesaj yaz…" maxlength="500" />
-        <button id="btn-chat">Gönder</button>
+    <form id="auth-form" class="card auth-card" autocomplete="on">
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab is-active" data-auth-tab="register" role="tab">Kayıt ol</button>
+        <button type="button" class="tab" data-auth-tab="login" role="tab">Giriş yap</button>
       </div>
 
-      <h3>Davet</h3>
-      <input id="invite-link" type="text" readonly />
-      <p class="hint" style="margin: 8px 0 4px">
-        Aşağıdaki link <strong>ikinci realtime instance'ına</strong> bağlanır —
-        farklı süreç, aynı oda. Senkron bozulmuyorsa paylaşılan state çalışıyor.
-      </p>
-      <input id="invite-link-2" type="text" readonly />
-    </aside>
+      <label class="field" data-only="register">
+        <span>Görünen ad</span>
+        <input id="display-name" type="text" placeholder="Adın" autocomplete="nickname" />
+      </label>
+
+      <label class="field">
+        <span>E-posta</span>
+        <input id="email" type="email" placeholder="sen@ornek.com" autocomplete="username" />
+      </label>
+
+      <label class="field">
+        <span>Parola</span>
+        <input id="password" type="password" placeholder="En az 8 karakter" autocomplete="current-password" />
+      </label>
+
+      <button id="btn-register" type="button" class="btn btn-primary btn-block">Hesap oluştur</button>
+      <button id="btn-login" type="button" class="btn btn-ghost btn-block is-hidden">Giriş yap</button>
+
+      <button id="btn-random" type="button" class="link-quiet">Hızlı deneme hesabı üret</button>
+      <p id="auth-status" class="status"></p>
+    </form>
   </div>
 </section>
 
-<footer>
-  <p>
-    Senkron motoru, saat offset ölçümü ve üç kademeli drift düzeltme:
-    <code>ROADMAP.md §4</code>. Yükleme/transkod hattı: <code>ROADMAP.md §5</code>.
-  </p>
-</footer>
+<!-- ═══════════════════════════════════════════════════════════ ANA EKRAN ═══ -->
+<section id="screen-home" class="screen is-hidden">
+  <header class="topbar">
+    <div class="brand brand-sm">
+      <span class="brand-mark">🍿</span>
+      <span class="brand-name">Birlikte İzle</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="who">
+      <span id="who-avatar" class="avatar"></span>
+      <span id="who-name" class="who-name"></span>
+    </div>
+    <button id="btn-logout" class="btn btn-quiet btn-sm">Çıkış</button>
+  </header>
 
-<!--
-  hls.js KENDİ SUNUCUMUZDAN servis ediliyor, CDN'den değil.
+  <main class="home">
+    <div class="home-grid">
+      <div class="card action-card">
+        <div class="card-head">
+          <h2>Yeni oda aç</h2>
+          <p>Bir YouTube videosuyla başla, sonra istediğin an değiştir.</p>
+        </div>
+        <label class="field">
+          <span>Oda adı</span>
+          <input id="room-name" type="text" value="Film gecesi" />
+        </label>
+        <label class="field">
+          <span>YouTube video kimliği</span>
+          <input id="yt-id" type="text" value="aqz-KE-bpKQ" spellcheck="false" />
+          <small>Bağlantıdaki <code>v=</code> sonrası 11 karakter</small>
+        </label>
+        <button id="btn-create" class="btn btn-primary btn-block">Odayı oluştur</button>
+      </div>
 
-  Neden: CDN'den bloklayıcı bir <script src> yüklerken o alan adı çözülemezse
-  tarayıcı sayfayı hiç açmaz. Bu makinede cdn.jsdelivr.net DNS'te çözülmedi ve
-  sayfa tamamen kilitlendi — tarayıcı testi bunu yakaladı. Tek bir üçüncü
-  taraf alan adının tüm uygulamayı düşürmesi kabul edilemez.
+      <div class="card action-card">
+        <div class="card-head">
+          <h2>Odaya katıl</h2>
+          <p>Sana gelen davet kodunu ya da bağlantıyı yapıştır.</p>
+        </div>
+        <label class="field">
+          <span>Oda kodu</span>
+          <input id="room-slug" type="text" placeholder="örn. 7xvvcbywn7" spellcheck="false" />
+        </label>
+        <button id="btn-join" class="btn btn-block">Katıl</button>
+        <p id="room-status" class="status"></p>
+      </div>
+    </div>
 
-  npm ile kurulur, esbuild ile paketlenir: npm run build:client
--->
+    <section class="library">
+      <div class="library-head">
+        <h2>Videolarım</h2>
+        <div class="upload-inline">
+          <input id="file-input" type="file" accept="video/*" class="file-input" />
+          <label for="file-input" class="btn btn-sm btn-quiet">Dosya seç</label>
+          <span id="file-name" class="file-name">seçilmedi</span>
+          <button id="btn-upload" class="btn btn-sm">Yükle ve işle</button>
+        </div>
+      </div>
+
+      <div id="upload-progress" class="upload-progress is-hidden">
+        <div class="bar"><div id="progress-fill"></div></div>
+        <span id="progress-label" class="mono"></span>
+      </div>
+      <p id="upload-status" class="status"></p>
+
+      <ul id="video-list" class="video-list"></ul>
+    </section>
+  </main>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════ ODA ═══ -->
+<section id="screen-room" class="screen is-hidden">
+  <header class="topbar">
+    <button id="btn-leave" class="btn btn-quiet btn-sm">‹ Odadan çık</button>
+    <div class="room-title">
+      <strong id="room-title">—</strong>
+      <span id="room-code" class="mono muted"></span>
+    </div>
+    <div class="spacer"></div>
+    <div id="conn-state" class="pill pill-off">bağlanıyor…</div>
+    <button id="btn-invite" class="btn btn-primary btn-sm">Davet et</button>
+    <button id="btn-debug" class="btn btn-quiet btn-sm" title="Teknik ayrıntılar">⚙</button>
+  </header>
+
+  <main class="room">
+    <div class="stage-col">
+      <div class="stage">
+        <div id="player"></div>
+        <video id="video" playsinline hidden></video>
+        <div id="stage-empty" class="stage-empty">
+          <span>🎬</span>
+          <p>Henüz bir kaynak seçilmedi</p>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button id="btn-play" class="btn btn-primary">▶ Oynat</button>
+        <button id="btn-pause" class="btn">⏸ Duraklat</button>
+        <div class="ctrl-sep"></div>
+        <button id="btn-back" class="btn btn-quiet">−10 sn</button>
+        <button id="btn-fwd" class="btn btn-quiet">+10 sn</button>
+        <div class="spacer"></div>
+        <span id="source-label" class="chip mono"></span>
+        <span id="sync-badge" class="chip chip-ok">senkron</span>
+      </div>
+    </div>
+
+    <aside class="side">
+      <div class="tabs side-tabs" role="tablist">
+        <button class="tab is-active" data-side-tab="chat" role="tab">Sohbet</button>
+        <button class="tab" data-side-tab="people" role="tab">
+          Katılımcılar <span id="people-count" class="count">0</span>
+        </button>
+      </div>
+
+      <div id="pane-chat" class="pane">
+        <div id="chat-log" class="chat-log"></div>
+        <div class="chat-compose">
+          <input id="chat-input" type="text" placeholder="Bir şeyler yaz…" maxlength="500" />
+          <button id="btn-chat" class="btn btn-primary btn-sm">Gönder</button>
+        </div>
+      </div>
+
+      <div id="pane-people" class="pane is-hidden">
+        <ul id="members" class="members"></ul>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Davet -->
+  <div id="invite-sheet" class="sheet is-hidden">
+    <div class="sheet-body card">
+      <div class="sheet-head">
+        <h3>Odaya davet et</h3>
+        <button id="btn-invite-close" class="btn btn-quiet btn-sm">Kapat</button>
+      </div>
+      <label class="field">
+        <span>Davet bağlantısı</span>
+        <div class="copy-row">
+          <input id="invite-link" type="text" readonly />
+          <button class="btn btn-sm" data-copy="invite-link">Kopyala</button>
+        </div>
+      </label>
+      <label class="field">
+        <span>İkinci sunucu üzerinden <em>(aynı oda, farklı süreç)</em></span>
+        <div class="copy-row">
+          <input id="invite-link-2" type="text" readonly />
+          <button class="btn btn-sm" data-copy="invite-link-2">Kopyala</button>
+        </div>
+        <small>Oda durumu sunucular arasında paylaşıldığı için senkron bozulmaz.</small>
+      </label>
+    </div>
+  </div>
+
+  <!-- Teknik çekmece -->
+  <div id="debug-drawer" class="drawer is-hidden">
+    <div class="drawer-head">
+      <strong>Senkron ayrıntıları</strong>
+      <button id="btn-debug-close" class="btn btn-quiet btn-sm">Kapat</button>
+    </div>
+    <table class="telemetry">
+      <tbody>
+        <tr><th>Oynatıcı</th><td id="t-player">—</td></tr>
+        <tr><th>Saat farkı</th><td id="t-offset">—</td></tr>
+        <tr><th>Gidiş-dönüş (RTT)</th><td id="t-rtt">—</td></tr>
+        <tr><th>Hedef konum</th><td id="t-target">—</td></tr>
+        <tr><th>Gerçek konum</th><td id="t-actual">—</td></tr>
+        <tr><th>Sapma</th><td id="t-drift">—</td></tr>
+        <tr><th>Düzeltme</th><td id="t-action">—</td></tr>
+        <tr><th>Durum sürümü</th><td id="t-version">—</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div id="toast" class="toast is-hidden"></div>
+
 <script src="/app/vendor/hls.js"></script>
-
-<!--
-  YouTube IFrame API self-host EDİLEMEZ (YouTube'dan gelmek zorunda), bu yüzden
-  `async` ile yükleniyor: erişilemezse sayfayı bloklamaz, yalnızca YouTube
-  oynatma devre dışı kalır. Kendi videolarınız (HLS) çalışmaya devam eder.
--->
 <script async src="https://www.youtube.com/iframe_api"></script>
-
 <script type="module" src="/app/app.js"></script>
 </body>
 </html>
