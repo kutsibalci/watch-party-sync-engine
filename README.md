@@ -77,10 +77,15 @@ K6_TARGET_VUS=2500 K6_ROOM_COUNT=150 \
   docker compose --profile app --profile load run --rm k6 run /scripts/ws-load.js
 ```
 
-⚠️ **`DOCKER_BUILDKIT=0` gerekebilir.** Proje klasörünün adında ASCII olmayan
-karakter varsa (`Birlikte **İ**zleme Platformu`) BuildKit, build context
-yolundan türettiği HTTP başlığı yüzünden düşer. Classic builder etkilenmez.
-Kalıcı çözüm klasörü ASCII bir isme taşımaktır.
+> **Klasör adında ASCII olmayan karakter kullanmayın.** BuildKit, build context
+> yolundan türettiği `x-docker-expose-session-sharedkey` HTTP başlığına ASCII
+> dışı karakter koyamaz ve şu hatayla düşer:
+> `header key ... contains value with non-printable ASCII characters`.
+>
+> Bu proje başlangıçta `Birlikte İzleme Platformu` klasöründeydi ve her build
+> `DOCKER_BUILDKIT=0` gerektiriyordu. Klasör ASCII bir isme taşındıktan sonra
+> BuildKit sorunsuz çalışıyor. Aynı hatayla karşılaşırsanız çözüm geçici bayrak
+> değil, klasörü yeniden adlandırmaktır.
 </details>
 
 ---
