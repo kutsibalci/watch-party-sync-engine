@@ -21,3 +21,4 @@ npm-debug.log*
 
 # esbuild ile uretilir (npm run build:client)
 public/protocol.js
+public/vendor/

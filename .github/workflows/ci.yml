@@ -135,6 +135,12 @@ jobs:
       - name: Faz 3 — ölçekleme testi (iki instance)
         run: WS_A=ws://127.0.0.1:8091/ws WS_B=ws://127.0.0.1:8092/ws npm run scale-test
 
+      # Gerçek Chrome, iki sekme. Runner imajında Google Chrome kurulu gelir.
+      # YouTube'a erişilemeyen ortamlarda oynatıcıya bağlı kontroller kendini
+      # ATLAR, testi düşürmez — dış servise dayanan iddia kırılgandır.
+      - name: Tarayıcı testi (gerçek Chrome, iki sekme)
+        run: CHROME_PATH=/usr/bin/google-chrome npm run browser-test
+
       - name: Hata durumunda logları göster
         if: failure()
         run: |

@@ -7,7 +7,9 @@
     "node": ">=22.6.0"
   },
   "scripts": {
-    "build:client": "esbuild src/shared/protocol-core.ts --bundle --format=esm --outfile=public/protocol.js --log-level=warning",
+    "build:client": "npm-run-all build:protocol build:vendor",
+    "build:protocol": "esbuild src/shared/protocol-core.ts --bundle --format=esm --outfile=public/protocol.js --log-level=warning",
+    "build:vendor": "esbuild hls.js --bundle --global-name=Hls --format=iife --minify --outfile=public/vendor/hls.js --log-level=warning",
     "dev:api": "tsx watch src/api/index.ts",
     "dev:realtime": "tsx watch src/realtime/index.ts",
     "dev:worker": "tsx watch src/worker/index.ts",
@@ -32,6 +34,7 @@
     "@fastify/static": "^8.3.0",
     "@fastify/websocket": "^11.3.0",
     "fastify": "^5.2.1",
+    "hls.js": "^1.6.17",
     "ioredis": "^5.4.2",
     "jose": "^5.9.6",
     "pg": "^8.13.1",

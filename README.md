@@ -3,7 +3,7 @@
 [![CI](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/Node-24-3c873a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Test](https://img.shields.io/badge/test-60%20senaryo-3ecf8e)
+![Test](https://img.shields.io/badge/test-75%20senaryo-3ecf8e)
 
 Arkadaşlarınla aynı anda video izlemeyi sağlayan gerçek zamanlı senkron motoru,
 transkod hattı ve yatay ölçeklenebilir WebSocket katmanı.
@@ -16,8 +16,8 @@ transkod hattı ve yatay ölçeklenebilir WebSocket katmanı.
 > zamanlı sistemler, asenkron iş işleme ve yatay ölçeklemeyi **ölçülmüş
 > sonuçlarla** göstermek.
 
-**Durum:** Faz 0–4 tamamlandı · **60 otomatik test** · tip kontrolü temiz ·
-üretim imajı root olmayan kullanıcıyla çalışıyor
+**Durum:** Faz 0–4 tamamlandı · **75 otomatik test** (gerçek Chrome testi dahil) ·
+tip kontrolü temiz · üretim imajı root olmayan kullanıcıyla çalışıyor
 
 ---
 
@@ -191,8 +191,10 @@ npm run smoke           # 13 · sağlık, auth, hata yolları, güvenlik davran�
 npm run sync-test       # 21 · senkron motoru, saat, versiyon, bilet, host devri
 npm run pipeline-test   # 14 · kuyruk mekanizmaları + gerçek ffmpeg transkodu
 npm run scale-test      # 12 · iki instance arası tutarlılık
-npm run browser-test    #      gerçek Chrome, iki sekme (HEADLESS=0 ile izle)
+npm run browser-test    # 15 · gerçek Chrome, iki sekme (HEADLESS=0 ile izle)
 ```
+
+Toplam **75 senaryo**, hepsi CI'da da koşuyor.
 
 Testler yalnızca "çalışıyor mu"yu değil **güvenlik davranışını** da doğruluyor:
 parola özeti sızıyor mu, kullanıcı numaralandırma mesajları aynı mı, bilet
@@ -202,6 +204,37 @@ ikinci kez kullanılabiliyor mu, başka odaya geçerli mi.
 > testi kırık sürümde de geçiyordu — Bob yalnızca kendini gördüğü için zaten
 > host'tu. Teste ön koşul eklendi: devirden önce Bob'un Alice'i host **gördüğü**
 > doğrulanır.
+
+### Tarayıcı testinin bulduğu üç şey
+
+Gerçek Chrome'da iki sekmeyle koşan test, protokol testlerinin göremediği
+katmanda üç sorun ortaya çıkardı:
+
+**1. Tek bir CDN tüm uygulamayı düşürüyordu.** Sayfa `hls.js`'i
+`cdn.jsdelivr.net`'ten bloklayıcı bir `<script>` ile yüklüyordu. O alan adı bu
+makinede DNS'te çözülmedi ve **sayfa hiç açılmadı**. hls.js artık npm'den
+kurulup esbuild ile paketleniyor ve kendi sunucumuzdan geliyor; YouTube API
+(self-host edilemez) `async` yükleniyor, erişilemezse sayfayı bloklamıyor.
+Test bunu kalıcı olarak koruyor: sayfada YouTube dışında dış script olmamalı.
+
+**2. Arka plandaki sekmede oynatıcı ilerlemiyor** — ve drift düzeltmesi bunu
+düzeltiyor. Test artık bunu ölçüyor:
+
+```
+B: 8646 ms  →  236 ms      (sekme öne getirildikten 6 sn sonra)
+```
+
+Arka planda 8,6 saniye kayan oynatıcı, öne gelince üç kademeli düzeltme
+tarafından hedefe çekildi. Bu, algoritmanın en zorlu senaryodaki kanıtı.
+
+**3. Testin kendi araçları da yalan söyleyebilir.** İki sekme açıkken
+`page.click()` arka plandaki sekmede sonsuza kadar asılı kalıyordu; Puppeteer
+tıklamadan önce elementin kararlı olmasını bekliyor ve bu kontrol arka plan
+sekmesinde hiç tamamlanmıyor. Aynı kökten `waitForFunction` de varsayılan
+`requestAnimationFrame` yoklamasıyla takılıyordu. Çözüm: etkileşimden önce
+`bringToFront()`, beklemelerde aralık yoklaması. Ayrıca sessiz asılmayı
+imkânsız kılan bir bekçi (watchdog) eklendi — **sessiz asılma, başarısızlıktan
+kötüdür.**
 
 ---
 

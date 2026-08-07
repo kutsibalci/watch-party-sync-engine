@@ -3,7 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Senkron İzleme — Faz 2</title>
+  <title>Senkron İzleme</title>
+  <!-- Gömülü SVG favicon: tarayıcının varsayılan /favicon.ico isteğini
+       ve ondan doğan 404'ü tamamen ortadan kaldırır. Ek ağ isteği yok. -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>" />
   <link rel="stylesheet" href="/app/style.css" />
 </head>
 <body>
@@ -127,8 +130,25 @@
   </p>
 </footer>
 
-<script src="https://www.youtube.com/iframe_api"></script>
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+<!--
+  hls.js KENDİ SUNUCUMUZDAN servis ediliyor, CDN'den değil.
+
+  Neden: CDN'den bloklayıcı bir <script src> yüklerken o alan adı çözülemezse
+  tarayıcı sayfayı hiç açmaz. Bu makinede cdn.jsdelivr.net DNS'te çözülmedi ve
+  sayfa tamamen kilitlendi — tarayıcı testi bunu yakaladı. Tek bir üçüncü
+  taraf alan adının tüm uygulamayı düşürmesi kabul edilemez.
+
+  npm ile kurulur, esbuild ile paketlenir: npm run build:client
+-->
+<script src="/app/vendor/hls.js"></script>
+
+<!--
+  YouTube IFrame API self-host EDİLEMEZ (YouTube'dan gelmek zorunda), bu yüzden
+  `async` ile yükleniyor: erişilemezse sayfayı bloklamaz, yalnızca YouTube
+  oynatma devre dışı kalır. Kendi videolarınız (HLS) çalışmaya devam eder.
+-->
+<script async src="https://www.youtube.com/iframe_api"></script>
+
 <script type="module" src="/app/app.js"></script>
 </body>
 </html>

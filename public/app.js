@@ -18,6 +18,16 @@ import {
 const API = location.origin;
 const WS_BASE = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:8091/ws`;
 
+/**
+ * hls.js kurucusu.
+ *
+ * esbuild IIFE + --global-name=Hls ile paketlendiğinde modül `window.Hls`
+ * altına bir ad alanı nesnesi olarak düşer ve gerçek sınıf `.default`
+ * içindedir. CDN'in UMD derlemesinde ise doğrudan `window.Hls`'tir.
+ * İkisini de destekliyoruz ki paketleme yöntemi değişince sessizce bozulmasın.
+ */
+const HlsLib = globalThis.Hls?.isSupported ? globalThis.Hls : globalThis.Hls?.default;
+
 // --------------------------------------------------------------- Durum
 let token = localStorage.getItem('token') || '';
 let me = null;
@@ -150,11 +160,11 @@ function mountSource(source, startAtMs, shouldPlay) {
 
     if (hls) { hls.destroy(); hls = null; }
 
-    if (window.Hls?.isSupported()) {
-      hls = new window.Hls({ enableWorker: true, lowLatencyMode: false });
+    if (HlsLib?.isSupported()) {
+      hls = new HlsLib({ enableWorker: true, lowLatencyMode: false });
       hls.loadSource(source.url);
       hls.attachMedia(video);
-      hls.on(window.Hls.Events.ERROR, (_e, data) => {
+      hls.on(HlsLib.Events.ERROR, (_e, data) => {
         if (data.fatal) addChat('sys', `HLS hatası: ${data.type} / ${data.details}`);
       });
     } else {
