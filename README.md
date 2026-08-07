@@ -1,100 +1,103 @@
-# Senkron İzleme Motoru
+# Watch Party Sync Engine
+
+*[Türkçe README](./README.tr.md)*
 
 [![CI](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/Node-24-3c873a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Test](https://img.shields.io/badge/test-75%20senaryo-3ecf8e)
+![Test](https://img.shields.io/badge/tests-75%20scenarios-3ecf8e)
 
-Arkadaşlarınla aynı anda video izlemeyi sağlayan gerçek zamanlı senkron motoru,
-transkod hattı ve yatay ölçeklenebilir WebSocket katmanı.
+A real-time synchronisation engine for watching video together, with a transcoding
+pipeline and a horizontally scalable WebSocket layer.
 
-**DRM'li içeriğe dokunmaz** — kendi yüklediğin dosyalar ve YouTube üzerinde
-çalışır. Bu bilinçli bir kapsam kararıdır; gerekçesi
-[aşağıda](#neden-netflix-yok-kapsam-kararı).
+**It does not touch DRM-protected content** — it works on files you upload yourself
+and on YouTube. That is a deliberate scope decision; the reasoning is
+[below](#why-no-netflix--a-scope-decision).
 
-> Bu bir ürün değil, **backend derinliği** projesidir. Amaç stateful gerçek
-> zamanlı sistemler, asenkron iş işleme ve yatay ölçeklemeyi **ölçülmüş
-> sonuçlarla** göstermek.
+> This is not a product, it is a **backend depth** project. The goal is to demonstrate
+> stateful real-time systems, asynchronous job processing and horizontal scaling
+> **with measured results**.
 
-**Durum:** Faz 0–4 tamamlandı · **75 otomatik test** (gerçek Chrome testi dahil) ·
-tip kontrolü temiz · üretim imajı root olmayan kullanıcıyla çalışıyor
+**Status:** phases 0–4 complete · **75 automated tests** (including a real Chrome test) ·
+type-check clean · production image runs as a non-root user
 
 ---
 
-## Ölçülmüş sonuçlar
+## Measured results
 
-Bir tek instance'ın nerede kırıldığı ve ikinciyi eklemenin ne kazandırdığı:
+Where a single instance breaks, and what adding a second one buys:
 
-| Kurulum | Eşzamanlı bağlantı | Yayın p95 | Yayın p99 | Sonuç |
+| Setup | Concurrent connections | Broadcast p95 | Broadcast p99 | Result |
 |---|---|---|---|---|
-| 1 instance | 800 | 5 ms | 30 ms | sağlıklı |
-| 1 instance | 2.500 | **258 ms** | **1.609 ms** | ❌ doydu |
-| 2 instance | 2.500 | **14 ms** | **47 ms** | ✅ sağlıklı |
-| 2 instance | 5.000 | 27 ms | 74 ms | ✅ sağlıklı |
+| 1 instance | 800 | 5 ms | 30 ms | healthy |
+| 1 instance | 2,500 | **258 ms** | **1,609 ms** | ❌ saturated |
+| 2 instances | 2,500 | **14 ms** | **47 ms** | ✅ healthy |
+| 2 instances | 5,000 | 27 ms | 74 ms | ✅ healthy |
 
-Instance sayısını ikiye katlamak gecikmeyi yarıya indirmedi — **34 kat**
-düşürdü. Sebebi: doygunluğa ulaşmış bir sistemde kuyruklar üstel büyür.
+Doubling the instance count did not halve the latency — it cut it by a factor of
+**34**. The reason: in a saturated system, queues grow exponentially.
 
-Ölçülen metrik, komuttan **aynı istemciye geri dönen yayına** kadar geçen süre:
-soket → Redis Lua → `PUBLISH` → abone instance → soket. Tam yöntem, kırılma
-noktası analizi ve **bulunan bir yanlış alarm**: [`docs/yuk-testi.md`](./docs/yuk-testi.md)
+The metric is the time from a command to the **broadcast arriving back at the same
+client**: socket → Redis Lua → `PUBLISH` → subscribing instance → socket. Full
+method, breaking-point analysis and **a false alarm that was found along the way**:
+[`docs/yuk-testi.md`](./docs/yuk-testi.md)
 
 ---
 
-## 60 saniyede çalıştır
+## Run it in 60 seconds
 
-Gereksinimler: **Node 22.6+**, **Docker Desktop**. (Postgres, Redis, ffmpeg
-host'a kurulmaz.)
+Requirements: **Node 22.6+**, **Docker Desktop**. (Postgres, Redis and ffmpeg are not
+installed on the host.)
 
 ```bash
 npm install
 cp .env.example .env
-node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"   # JWT_SECRET'e yaz
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"   # write into JWT_SECRET
 
 npm run infra:up      # postgres, redis, minio, prometheus, grafana
 npm run migrate
 npm run dev           # api + realtime + worker
 
-npm run smoke         # 13 test — her şey bağlandı mı?
+npm run smoke         # 13 tests — is everything connected?
 ```
 
-Tarayıcıda **http://127.0.0.1:8090/app/** →
-"Rastgele kullanıcı üret" → "Kayıt ol" → "Oda oluştur" → davet linkini ikinci
-sekmede aç → ▶ Oynat.
+In the browser go to **http://127.0.0.1:8090/app/** →
+"Generate random user" → "Register" → "Create room" → open the invite link in a
+second tab → ▶ Play.
 
-Telemetri tablosunda saat offset'i, RTT, hedef/gerçek pozisyon, anlık sapma ve
-uygulanan düzeltme kademesi canlı görünür.
+The telemetry table shows clock offset, RTT, target/actual position, current drift
+and the applied correction tier, live.
 
 <details>
-<summary>Her şeyi Docker içinde çalıştırmak · iki instance · yük testi</summary>
+<summary>Running everything inside Docker · two instances · load test</summary>
 
 ```bash
-# Uygulama servisleri de container'da (iki realtime instance dahil)
+# Application services in containers too (including two realtime instances)
 docker compose --profile app up --build
 
-# Yük testi (host'a k6 kurulmaz)
+# Load test (k6 is not installed on the host)
 K6_TARGET_VUS=2500 K6_ROOM_COUNT=150 \
   docker compose --profile app --profile load run --rm k6 run /scripts/ws-load.js
 ```
 
-> **Klasör adında ASCII olmayan karakter kullanmayın.** BuildKit, build context
-> yolundan türettiği `x-docker-expose-session-sharedkey` HTTP başlığına ASCII
-> dışı karakter koyamaz ve şu hatayla düşer:
+> **Do not use non-ASCII characters in the folder name.** BuildKit derives the
+> `x-docker-expose-session-sharedkey` HTTP header from the build context path and
+> cannot put non-ASCII characters in it, so it fails with:
 > `header key ... contains value with non-printable ASCII characters`.
 >
-> Bu proje başlangıçta `Birlikte İzleme Platformu` klasöründeydi ve her build
-> `DOCKER_BUILDKIT=0` gerektiriyordu. Klasör ASCII bir isme taşındıktan sonra
-> BuildKit sorunsuz çalışıyor. Aynı hatayla karşılaşırsanız çözüm geçici bayrak
-> değil, klasörü yeniden adlandırmaktır.
+> This project originally lived in a folder called `Birlikte İzleme Platformu`, and
+> every build needed `DOCKER_BUILDKIT=0`. After moving it to an ASCII name BuildKit
+> works fine. If you hit the same error, the fix is to rename the folder, not to set
+> the flag permanently.
 </details>
 
 ---
 
-## Mimari
+## Architecture
 
 ```
                         ┌──────────────┐
-                        │   Tarayıcı   │
+                        │   Browser    │
                         └──┬────────┬──┘
                     HTTP   │        │   WebSocket
                            │        │
@@ -105,387 +108,390 @@ K6_TARGET_VUS=2500 K6_ROOM_COUNT=150 \
                      │     │        │         │        │        │
         ┌────────────▼┐  ┌─▼────────▼─────────▼────────▼──┐  ┌──▼─────────┐
         │  Postgres   │  │            Redis               │  │  MinIO     │
-        │             │  │  • oda state (HASH + Lua)      │  │  (S3)      │
-        │  kalıcı     │  │  • Pub/Sub (oda + kullanıcı)   │  │            │
-        │  veri       │  │  • presence + kalp atışı       │  │  HLS       │
-        │             │  │  • iş kuyruğu                  │  │  segment   │
+        │             │  │  • room state (HASH + Lua)     │  │  (S3)      │
+        │  durable    │  │  • Pub/Sub (room + user)       │  │            │
+        │  data       │  │  • presence + heartbeat        │  │  HLS       │
+        │             │  │  • job queue                   │  │  segments  │
         └─────────────┘  └───────────┬────────────────────┘  └──▲─────────┘
-                                     │ iş çeker                 │ yazar
+                                     │ pulls jobs               │ writes
                             ┌────────▼──────────────────────────┴─┐
                             │  Worker  (ffprobe + ffmpeg → HLS)   │
                             └─────────────────────────────────────┘
 ```
 
-**Neden API ve realtime ayrı süreç?** API stateless, yatayda serbestçe
-çoğaltılır. Realtime stateful — WebSocket bağlantıları belirli bir instance'a
-bağlıdır. Bu ayrım, Faz 3'teki ölçekleme problemini yalıtır.
+**Why are API and realtime separate processes?** The API is stateless and can be
+replicated freely. Realtime is stateful — WebSocket connections are bound to a
+specific instance. That separation is what isolates the scaling problem in phase 3.
 
-**Neden dosyalar API'den geçmez?** Yükleme presigned URL ile doğrudan object
-storage'a gider. API gigabaytlarca veriyi proxy'lemez; `bodyLimit` 1 MB.
+**Why don't files go through the API?** Uploads go straight to object storage with a
+presigned URL. The API never proxies gigabytes; its `bodyLimit` is 1 MB.
 
 ---
 
-## Üç mühendislik hikâyesi
+## Three engineering stories
 
-### 1. İki instance, bölünmüş oda — ve çift host
+### 1. Two instances, a split room — and two hosts
 
-Önce **bilinçli olarak kırdık**. İkinci realtime instance'ı eklendi, Alice
-birinciye Bob ikinciye bağlandı — aynı odaya. State süreç belleğindeydi:
+First it was **broken on purpose**. A second realtime instance was added, Alice
+connected to the first and Bob to the second — same room. State lived in process
+memory:
 
-| Ölçüm | Öncesi | Sonrası |
+| Measurement | Before | After |
 |---|---|---|
-| Ölçekleme testi | 4 geçti / **8 kaldı** | **12 / 0** |
-| Host | **İki ayrı host** (split-brain) | Tek host |
-| Versiyon | A=v2, B=v1 | İkisi de v13 |
-| Pozisyon farkı | **8.460 ms** | **0,0 ms** |
+| Scaling test | 4 passed / **8 failed** | **12 / 0** |
+| Host | **Two separate hosts** (split-brain) | One host |
+| Version | A=v2, B=v1 | Both v13 |
+| Position difference | **8,460 ms** | **0.0 ms** |
 
-Ham çıktılar: [`kırılma öncesi`](./docs/faz3-kirilma-oncesi.txt) ·
-[`sonrası`](./docs/faz3-kirilma-sonrasi.txt)
+Raw output: [`before the break`](./docs/faz3-kirilma-oncesi.txt) ·
+[`after`](./docs/faz3-kirilma-sonrasi.txt)
 
-**Çözüm üç parçalı:** (a) state Redis HASH'ine taşındı, (b) her geçiş **tek Lua
-betiğinde** atomik — oku → pozisyonu ilerlet → değiştir → versiyon++ → yaz →
-**yayınla**, (c) her instance odanın kanalına abone.
+**The fix has three parts:** (a) state moved into a Redis HASH, (b) every transition
+is atomic **inside a single Lua script** — read → advance position → mutate →
+version++ → write → **publish**, and (c) every instance subscribes to the room's
+channel.
 
-> **Yayın neden betiğin içinde?** Versiyonu artırıp *sonra* ayrı komutla
-> `PUBLISH` etseydik, iki instance'ın yayınları versiyon sırasından farklı
-> sırada çıkabilirdi ve istemci "eski versiyon" deyip doğru mesajı atardı.
+> **Why is the publish inside the script?** If we incremented the version and *then*
+> issued a separate `PUBLISH`, broadcasts from two instances could leave in an order
+> different from the version order, and the client would discard the correct message
+> as "an old version".
 
-### 2. Yük testinde bir yanlış alarm
+### 2. A false alarm in the load test
 
-5.000 bağlantıda `HELLO` gecikmesi p95 = 9,4 saniye görünüyordu. İlk iki
-hipotez **yanlış çıktı** — Postgres havuzu değildi, TCP accept kuyruğu da
-değildi. Tahmin etmeyi bırakıp ölçtük:
+At 5,000 connections the `HELLO` latency looked like p95 = 9.4 seconds. The first two
+hypotheses were **both wrong** — it was not the Postgres pool, and it was not the TCP
+accept queue. We stopped guessing and measured:
 
-| Kanıt | Sonuç |
+| Evidence | Conclusion |
 |---|---|
-| Aynı anda HTTP isteği | p50 = **3 ms** — host doygun değil |
-| Sunucu tarafı katılım süresi (yeni metrik) | ortalama **34 ms**, %99,2'si <250 ms |
-| Yük 2 k6 konteynerine bölündü | HELLO p95 **9.400 ms → 97 ms** |
+| An HTTP request at the same moment | p50 = **3 ms** — the host is not saturated |
+| Server-side join duration (a new metric) | mean **34 ms**, 99.2% under 250 ms |
+| Load split across 2 k6 containers | HELLO p95 **9,400 ms → 97 ms** |
 
-Sunucuda hiçbir şey değişmedi. Darboğaz **yük üretecinin kendisiydi**.
+Nothing changed on the server. The bottleneck was **the load generator itself**.
 
-> **Ders:** Yük testi sonuçlarına inanmadan önce yük üretecinin darboğaz
-> olmadığını kanıtlayın. Sunucu tarafı enstrümantasyon olmasaydı günlerce
-> olmayan bir sorunu "optimize" edebilirdik.
+> **Lesson:** before believing load-test numbers, prove the load generator is not the
+> bottleneck. Without server-side instrumentation we could have spent days
+> "optimising" a problem that did not exist.
 
-Bu arayışta bulunan **gerçek** bir sorun da düzeltildi: her katılım/ayrılma
-`PRESENCE` yayınlıyordu ve maliyeti O(katılım × instance × üye) idi. Yayınlar
-250 ms penceresinde birleştirildi.
+A **real** problem was found during that hunt and fixed too: every join and leave was
+broadcasting `PRESENCE`, at a cost of O(joins × instances × members). Broadcasts are
+now coalesced into a 250 ms window.
 
-### 3. Neden "exactly-once" peşinde koşmadık
+### 3. Why we did not chase exactly-once
 
-Worker işi bitirip "tamam" demeden hemen önce çökerse, görünürlük süresi
-dolduğunda iş **başka bir worker'a gider ve ikinci kez işlenir**. Bu bir hata
-değil, dağıtık sistemlerin doğası.
+If a worker crashes right after finishing a job but before acknowledging it, the job
+**goes to another worker and is processed a second time** once the visibility timeout
+expires. That is not a bug, it is the nature of distributed systems.
 
-Model: **at-least-once teslimat + idempotent işleyici.** Transkod her denemenin
-başında önceki çıktıyı siler, aynı anahtarlara yazar, DB'yi aynı sonuca
-günceller — iki kez çalışsa da sonuç aynı.
+The model is **at-least-once delivery plus an idempotent handler**. At the start of
+every attempt the transcoder deletes the previous output, writes to the same keys and
+updates the database to the same result — running twice produces the same outcome.
 
-Kuyruk elle yazıldı (BullMQ/Celery yok): atomik claim (Lua), visibility
-timeout, reaper, üstel geri çekilme, dead-letter queue. Test **5 worker'ın aynı
-anda claim ettiğini ve tam olarak 1'inin kazandığını** doğruluyor.
+The queue is hand-written (no BullMQ, no Celery): atomic claim in Lua, visibility
+timeout, reaper, exponential backoff, dead-letter queue. A test verifies that **five
+workers claim simultaneously and exactly one wins**.
 
 ---
 
-## Testler
+## Tests
 
 ```bash
-npm run typecheck       # tsc, iki yapılandırma
-npm run smoke           # 13 · sağlık, auth, hata yolları, güvenlik davranışı
-npm run sync-test       # 21 · senkron motoru, saat, versiyon, bilet, host devri
-npm run pipeline-test   # 14 · kuyruk mekanizmaları + gerçek ffmpeg transkodu
-npm run scale-test      # 12 · iki instance arası tutarlılık
-npm run browser-test    # 15 · gerçek Chrome, iki sekme (HEADLESS=0 ile izle)
+npm run typecheck       # tsc, two configurations
+npm run smoke           # 13 · health, auth, error paths, security behaviour
+npm run sync-test       # 21 · sync engine, clock, versioning, tickets, host handover
+npm run pipeline-test   # 14 · queue mechanics + a real ffmpeg transcode
+npm run scale-test      # 12 · consistency across two instances
+npm run browser-test    # 15 · real Chrome, two tabs (watch it with HEADLESS=0)
 ```
 
-Toplam **75 senaryo**, hepsi CI'da da koşuyor.
+**75 scenarios** in total, all of them running in CI as well.
 
-Testler yalnızca "çalışıyor mu"yu değil **güvenlik davranışını** da doğruluyor:
-parola özeti sızıyor mu, kullanıcı numaralandırma mesajları aynı mı, bilet
-ikinci kez kullanılabiliyor mu, başka odaya geçerli mi.
+The tests check more than "does it work" — they check **security behaviour**: whether
+the password hash leaks, whether the user-enumeration messages are identical, whether
+a ticket can be used twice, whether it is valid for another room.
 
-> **Geçen bir test, doğru şeyi test ettiğinin kanıtı değildir.** "Host devri"
-> testi kırık sürümde de geçiyordu — Bob yalnızca kendini gördüğü için zaten
-> host'tu. Teste ön koşul eklendi: devirden önce Bob'un Alice'i host **gördüğü**
-> doğrulanır.
+> **A passing test is not proof that it tests the right thing.** The "host handover"
+> test passed on the broken version too — Bob was already host because he could only
+> see himself. The test now has a precondition: before the handover it asserts that
+> Bob **sees** Alice as host.
 
-### Tarayıcı testinin bulduğu üç şey
+### Three things the browser test found
 
-Gerçek Chrome'da iki sekmeyle koşan test, protokol testlerinin göremediği
-katmanda üç sorun ortaya çıkardı:
+Running in real Chrome with two tabs surfaced three problems in a layer the protocol
+tests cannot see:
 
-**1. Tek bir CDN tüm uygulamayı düşürüyordu.** Sayfa `hls.js`'i
-`cdn.jsdelivr.net`'ten bloklayıcı bir `<script>` ile yüklüyordu. O alan adı bu
-makinede DNS'te çözülmedi ve **sayfa hiç açılmadı**. hls.js artık npm'den
-kurulup esbuild ile paketleniyor ve kendi sunucumuzdan geliyor; YouTube API
-(self-host edilemez) `async` yükleniyor, erişilemezse sayfayı bloklamıyor.
-Test bunu kalıcı olarak koruyor: sayfada YouTube dışında dış script olmamalı.
+**1. A single CDN was taking the whole application down.** The page loaded `hls.js`
+from `cdn.jsdelivr.net` with a blocking `<script>`. That domain did not resolve in DNS
+on this machine and **the page never opened at all**. hls.js is now installed from npm,
+bundled with esbuild and served from our own origin; the YouTube API (which cannot be
+self-hosted) is loaded `async` so it cannot block the page when unreachable. A test
+guards this permanently: the page must contain no external script other than YouTube.
 
-**2. Arka plandaki sekmede oynatıcı ilerlemiyor** — ve drift düzeltmesi bunu
-düzeltiyor. Test artık bunu ölçüyor:
+**2. The player does not advance in a background tab** — and the drift correction
+fixes it. The test now measures this:
 
 ```
-B: 8646 ms  →  236 ms      (sekme öne getirildikten 6 sn sonra)
+B: 8646 ms  →  236 ms      (6 s after the tab was brought to the front)
 ```
 
-Arka planda 8,6 saniye kayan oynatıcı, öne gelince üç kademeli düzeltme
-tarafından hedefe çekildi. Bu, algoritmanın en zorlu senaryodaki kanıtı.
+A player that had drifted 8.6 seconds in the background was pulled back to target by
+the three-tier correction once it came forward. That is the algorithm's proof in the
+hardest scenario.
 
-**3. Testin kendi araçları da yalan söyleyebilir.** İki sekme açıkken
-`page.click()` arka plandaki sekmede sonsuza kadar asılı kalıyordu; Puppeteer
-tıklamadan önce elementin kararlı olmasını bekliyor ve bu kontrol arka plan
-sekmesinde hiç tamamlanmıyor. Aynı kökten `waitForFunction` de varsayılan
-`requestAnimationFrame` yoklamasıyla takılıyordu. Çözüm: etkileşimden önce
-`bringToFront()`, beklemelerde aralık yoklaması. Ayrıca sessiz asılmayı
-imkânsız kılan bir bekçi (watchdog) eklendi — **sessiz asılma, başarısızlıktan
-kötüdür.**
+**3. The test's own tools can lie too.** With two tabs open, `page.click()` hung
+forever on the background tab; Puppeteer waits for the element to be stable before
+clicking and that check never completes in a background tab. `waitForFunction` stalled
+for the same reason, on its default `requestAnimationFrame` polling. The fix:
+`bringToFront()` before interacting, and interval polling in the waits. A watchdog was
+added that makes a silent hang impossible — **a silent hang is worse than a failure.**
 
 ---
 
-## Servisler
+## Services
 
-| Servis | Adres | Not |
+| Service | Address | Note |
 |---|---|---|
-| API | http://127.0.0.1:8090 | REST, auth, sağlık, metrikler |
-| Test istemcisi | http://127.0.0.1:8090/app/ | |
-| Realtime #1 / #2 | :8091 / :8092 | state Redis'te paylaşımlı |
-| Grafana | http://127.0.0.1:3000 | pano kod olarak sağlanır |
+| API | http://127.0.0.1:8090 | REST, auth, health, metrics |
+| Test client | http://127.0.0.1:8090/app/ | |
+| Realtime #1 / #2 | :8091 / :8092 | state shared in Redis |
+| Grafana | http://127.0.0.1:3000 | dashboard provisioned as code |
 | Prometheus | http://127.0.0.1:9090 | |
-| MinIO konsolu | http://127.0.0.1:9001 | `minioadmin` / `minioadmin` |
+| MinIO console | http://127.0.0.1:9001 | `minioadmin` / `minioadmin` |
 
-> **Neden 8080 değil?** 8080/8081 çok sık çakışır. Bu makinede
-> `localhost:8080` IPv6 üzerinden başka bir servise gidiyordu. Ayrıca Windows'ta
-> `localhost` önce `::1`'e çözülür — belirsizliği önlemek için her yerde açıkça
-> `127.0.0.1` kullanıyoruz.
+> **Why not 8080?** 8080/8081 collide far too often. On this machine
+> `localhost:8080` was reaching a different service over IPv6. On Windows `localhost`
+> also resolves to `::1` first — to avoid the ambiguity we use `127.0.0.1` explicitly
+> everywhere.
 
 <details>
-<summary>API uçları ve WebSocket protokolü</summary>
+<summary>API endpoints and the WebSocket protocol</summary>
 
-| Metot | Yol | Açıklama |
+| Method | Path | Description |
 |---|---|---|
-| `GET` | `/healthz` · `/readyz` · `/metrics` | liveness ayrı, readiness ayrı |
+| `GET` | `/healthz` · `/readyz` · `/metrics` | liveness and readiness are separate |
 | `POST` | `/api/auth/register` · `/login` | |
 | `GET` | `/api/auth/me` | |
 | `POST` | `/api/rooms` · `/:slug/join` · `/:slug/ticket` | |
-| `PATCH` | `/api/rooms/:slug/video` | odanın kaynağını HLS videoya çevirir |
-| `POST` | `/api/videos` · `/:id/complete` | presigned yükleme + kuyruğa alma |
+| `PATCH` | `/api/rooms/:slug/video` | switches the room's source to an HLS video |
+| `POST` | `/api/videos` · `/:id/complete` | presigned upload + enqueue |
 | `GET` | `/api/videos` · `/:id` · `/queue/stats` | |
 
-Bağlantı: `ws://127.0.0.1:8091/ws?room=<slug>&ticket=<bilet>`
+Connect with `ws://127.0.0.1:8091/ws?room=<slug>&ticket=<ticket>`
 
-| İstemci → Sunucu | Sunucu → İstemci |
+| Client → Server | Server → Client |
 |---|---|
 | `PING` `PLAY` `PAUSE` `SEEK` | `HELLO` `PONG` `STATE` `PRESENCE` |
 | `SET_SOURCE` *(host)* `HEARTBEAT` `CHAT` | `CHAT` `VIDEO_PROGRESS` `ERROR` |
 
-Teşhis: `GET :8091/debug/rooms/:slug` — iki porttan da çağırıp aynı state'i
-görmek, paylaşımın çalıştığının en kısa kanıtı.
+Diagnostics: `GET :8091/debug/rooms/:slug` — calling it on both ports and seeing the
+same state is the shortest proof that sharing works.
 </details>
 
 ---
 
-## Tasarım kararları
+## Design decisions
 
 <details>
-<summary><b>Senkron algoritması</b> — saat offset'i ve üç kademeli drift düzeltme</summary>
+<summary><b>The sync algorithm</b> — clock offset and three-tier drift correction</summary>
 
-**Saat senkronu.** İstemcinin saati sunucununkiyle aynı değil. NTP hesabı:
+**Clock synchronisation.** The client's clock is not the server's. The NTP formula:
 
 ```
 RTT    = (t3 - t0) - (t2 - t1)
 offset = ((t1 - t0) + (t2 - t3)) / 2
 ```
 
-8–10 örnek alınır ve **en düşük RTT'li** seçilir — medyan değil. En düşük
-RTT'li pakette kuyruk gecikmesi en azdır, offset tahmini en az bulanıktır.
+8–10 samples are taken and the one with the **lowest RTT** is picked — not the median.
+The packet with the lowest RTT has the least queuing delay, so its offset estimate is
+the least blurred.
 
-**Drift düzeltme üç kademeli. Doğrudan seek yanlış cevaptır:**
+**Drift correction has three tiers. Seeking directly is the wrong answer:**
 
 ```
-|sapma| < 100ms       → hiçbir şey yapma (algılanamaz)
-100ms ≤ |sapma| < 1s  → playbackRate = 1.00 ± 0.02, sessizce yakala
-|sapma| ≥ 1s          → hard seek
+|drift| < 100ms       → do nothing (imperceptible)
+100ms ≤ |drift| < 1s  → playbackRate = 1.00 ± 0.02, catch up silently
+|drift| ≥ 1s          → hard seek
 ```
 
-Her seek arabelleği boşaltır ve videoyu dondurur. %2'lik hız farkı kulakla
-duyulmaz ama 500 ms'lik sapmayı 25 saniyede kapatır.
+Every seek flushes the buffer and freezes the video. A 2% rate difference is inaudible
+but closes a 500 ms drift in 25 seconds.
 
-**Planda olmayan sorun:** YouTube oynatıcısı `setPlaybackRate(1.02)` çağrısını
-desteklenen hız listesine yuvarlayabiliyor. Bunu varsaymak yerine **çalışma
-anında ölçüyoruz** — hız bir kez ayarlanıp geri okunuyor, tutmazsa daha geniş
-bantlı stratejiye düşülüyor. `<video>` + hls.js tam destekliyor.
+**A problem that was not in the plan:** the YouTube player can round a
+`setPlaybackRate(1.02)` call to its list of supported rates. Rather than assume, we
+**measure at runtime** — the rate is set once and read back, and if it did not take we
+fall back to a wider-band strategy. `<video>` + hls.js support it fully.
 </details>
 
 <details>
-<summary><b>Versiyon numarası</b> — sırasızlık ve eşzamanlı komutlar</summary>
+<summary><b>Version numbers</b> — reordering and concurrent commands</summary>
 
-Sunucu her state değişikliğinde `version`'ı artırır. İstemci, kendi
-gördüğünden **küçük veya eşit** versiyonlu bir `STATE` alırsa yoksayar.
+The server increments `version` on every state change. A client ignores any `STATE`
+whose version is **less than or equal to** the one it has already seen.
 
-Bu tek kural iki problemi birden çözer: gecikip sonra gelen eski paket state'i
-geri almaz; iki kullanıcı aynı anda `PLAY` ve `PAUSE` gönderdiğinde ikisi de
-aynı son duruma varır. Test, "hangisinin kazandığını" değil **ayrışmadıklarını**
-doğrular.
+That single rule solves two problems at once: a delayed packet arriving late cannot
+roll the state back, and when two users send `PLAY` and `PAUSE` at the same moment both
+converge on the same final state. The test does not assert *which one wins* — it
+asserts that they **do not diverge**.
 </details>
 
 <details>
-<summary><b>Host seçimi</b> — bağlı en eski üye</summary>
+<summary><b>Host selection</b> — the oldest connected member</summary>
 
-Ayrı bir seçim turu yoktur. Host, tüm instance'lardaki **canlı en eski
-üyedir**; sıralama deterministik (beraberlikte `connectionId`) olduğu için her
-instance aynı sonuca varır. Host ayrılınca sıradaki otomatik host olur.
+There is no separate election round. The host is the **oldest live member across all
+instances**; because the ordering is deterministic (ties broken by `connectionId`),
+every instance reaches the same answer. When the host leaves, the next one becomes host
+automatically.
 
-Kalıcı sahiplik (`room_members.role`) ile **etkin host** (o an odayı yöneten
-bağlı üye) ayrı kavramlardır.
+Durable ownership (`room_members.role`) and the **effective host** (the connected member
+currently driving the room) are separate concepts.
 </details>
 
 <details>
-<summary><b>"Kim sağ?"</b> — kalp atışı, iki farklı yerde aynı fikir</summary>
+<summary><b>"Who is alive?"</b> — heartbeats, the same idea in two places</summary>
 
-Bir instance çökerse Redis'te bıraktığı üye kayıtlarını kimse silmez. Her
-instance kendi bağlantılarının son görülme zamanını 15 saniyede bir ZSET'e
-yazar; 45 saniyedir görülmeyen düşer.
+If an instance crashes, nobody cleans up the member records it left in Redis. Every
+instance writes the last-seen time of its own connections into a ZSET every 15 seconds;
+anything unseen for 45 seconds is dropped.
 
-Bu, kuyruktaki **visibility timeout** ile birebir aynı fikirdir: dağıtık bir
-sistemde bir sürecin öldüğünü kimse haber vermez.
+This is exactly the same idea as the **visibility timeout** in the queue: in a
+distributed system, nobody tells you a process has died.
 </details>
 
 <details>
-<summary><b>Güvenlik</b> — bilet, parola, kullanıcı numaralandırma, yükleme</summary>
+<summary><b>Security</b> — tickets, passwords, user enumeration, uploads</summary>
 
-**WebSocket bileti.** Tarayıcının WS API'si özel HTTP başlığı gönderemez, sırrı
-query string'de taşımak zorunludur — ama **hangi sırrı** taşıdığımız önemli.
-Ham JWT 15 dakika geçerli ve tüm hesabı temsil eder; query string ise proxy
-loglarına düşer. Bunun yerine API'den **30 saniyelik, tek kullanımlık, tek
-odaya kilitli** bir bilet alınır. Redis'te ham bilet değil **SHA-256 özeti**
-saklanır; tüketim `GETDEL` ile atomiktir.
+**The WebSocket ticket.** The browser's WS API cannot send custom HTTP headers, so the
+secret has to travel in the query string — but **which secret** matters. A raw JWT is
+valid for 15 minutes and represents the whole account, and query strings end up in proxy
+logs. Instead the client fetches a **30-second, single-use, single-room** ticket from the
+API. Redis stores the **SHA-256 digest**, not the raw ticket, and consumption is atomic
+via `GETDEL`.
 
-**Parola: scrypt, N=2^15.** bcrypt/argon2 native derleme ister. scrypt Node
-çekirdeğindedir. Parametre seçimi bilinçli bir ödünleşme: bellek ihtiyacı
-≈ `128·N·r`. OWASP'ın önerdiği N=2^17 işlem başına ~134 MB demektir — 10
-eşzamanlı giriş 1,3 GB tüketir. N=2^15 (~33 MB) hâlâ güçlüdür ve eşzamanlılık
-altında ayakta kalır.
+**Passwords: scrypt, N=2^15.** bcrypt and argon2 need native compilation; scrypt is in
+the Node core. The parameter choice is a deliberate trade-off: memory need is
+≈ `128·N·r`. OWASP's recommended N=2^17 means ~134 MB per operation — ten concurrent
+logins would consume 1.3 GB. N=2^15 (~33 MB) is still strong and survives concurrency.
 
-**Kullanıcı numaralandırma kapalı.** Kullanıcı bulunamadığında da bir parola
-doğrulaması kadar zaman harcanır (`fakeVerify`); mesaj her iki durumda aynıdır.
+**User enumeration is closed.** When a user is not found, as much time is spent as a
+real password verification (`fakeVerify`), and the message is identical either way.
 
-**Kayıtta yarış SELECT ile değil kısıtla çözülür.** "Önce bak, yoksa ekle"
-yarışı kapatmaz; benzersizlik ihlalini (`23505`) yakalayıp 409'a çevirmek tek
-doğru yoldur.
+**The registration race is closed by a constraint, not a SELECT.** "Check first, insert
+if absent" does not close the race; catching the uniqueness violation (`23505`) and
+turning it into a 409 is the only correct way.
 
-**Yükleme düşman girdisidir.** ffprobe ile doğrulanmadan ffmpeg'e verilmez
-(aksi hâlde tüm demuxer saldırı yüzeyi açılır). ffmpeg 30 dk zaman aşımıyla
-çalışır, stderr son 8 KB ile sınırlıdır, başarısız transkodun yarım çıktısı
-silinir.
+**An upload is adversarial input.** It is never handed to ffmpeg without being validated
+by ffprobe first (otherwise the entire demuxer attack surface is exposed). ffmpeg runs
+with a 30-minute timeout, stderr is capped at the last 8 KB, and the partial output of a
+failed transcode is deleted.
 </details>
 
 <details>
-<summary><b>Yapılandırma bölümlemesi</b> — en az yetki</summary>
+<summary><b>Config partitioning</b> — least privilege</summary>
 
-Tek `EnvSchema` kullanınca her servis her değişkeni zorunlu kılıyordu; realtime
-servisi object storage ile hiç işi olmamasına rağmen `S3_*` eksik diye ayağa
-kalkamadı. Artık `BaseSchema` (herkes) ve `StorageSchema` (yalnızca api +
-worker) ayrı.
+With a single `EnvSchema`, every service required every variable; the realtime service
+could not start because `S3_*` was missing, despite having nothing to do with object
+storage. There are now separate `BaseSchema` (everyone) and `StorageSchema` (api and
+worker only).
 
-Realtime HLS için genel URL üretmeli ama S3 kimlik bilgisi **almamalı**:
-adresleme bilgisi temel bölümde, kimlik bilgileri storage bölümünde.
-`media.ts` yalnızca adresleme kullanır.
+Realtime has to build public URLs for HLS but must **not** receive S3 credentials:
+addressing information lives in the base section, credentials in the storage section.
+`media.ts` uses addressing only.
 </details>
 
 <details>
-<summary><b>MinIO + Docker tuzağı</b> — presigned URL'in imzası host'u kapsar</summary>
+<summary><b>The MinIO + Docker trap</b> — a presigned URL's signature covers the host</summary>
 
-Docker içinde `S3_ENDPOINT` = `http://minio:9000`. Bu adresle imzalanan URL
-tarayıcıya verilirse `minio` çözülemez; host'u sonradan değiştirmek de imzayı
-bozar. Çözüm iki ayrı S3 istemcisi: sunucudan sunucuya dahili adres, presigned
-URL üretimi genel adres (`S3_PUBLIC_ENDPOINT`).
+Inside Docker, `S3_ENDPOINT` is `http://minio:9000`. A URL signed with that address and
+handed to the browser cannot resolve `minio`, and changing the host afterwards breaks the
+signature. The fix is two separate S3 clients: the internal address for server-to-server,
+the public address (`S3_PUBLIC_ENDPOINT`) for generating presigned URLs.
 
-Ayrıca veritabanında **mutlak URL saklanmaz** — `hls_master_key` bir storage
-anahtarıdır; URL ortama göre değişir.
+The database also stores **no absolute URLs** — `hls_master_key` is a storage key; the
+URL depends on the environment.
 </details>
 
 <details>
-<summary><b>Tek kaynak</b> — protokol tekrarının kaldırılması</summary>
+<summary><b>One source of truth</b> — removing the protocol duplication</summary>
 
-Faz 1–3'te `public/app.js` protokol sabitlerini ve drift matematiğini elle
-kopyalıyordu; iki kopyanın ayrışması an meselesiydi. Artık
-`src/shared/protocol-core.ts` esbuild ile `public/protocol.js` olarak
-derleniyor (1,4 KB — zod dahil değil, istemci doğrulama yapmaz).
+In phases 1–3, `public/app.js` copied the protocol constants and the drift maths by hand;
+the two copies diverging was only a matter of time. Now
+`src/shared/protocol-core.ts` is compiled by esbuild into `public/protocol.js` (1.4 KB —
+zod is not included, the client does no validation).
 
-Çalışma anı doğrulama şemaları `protocol.ts` içinde ve yalnızca sunucuda.
+The runtime validation schemas live in `protocol.ts` and stay on the server.
 </details>
 
 <details>
 <summary><b>Liveness ≠ readiness</b></summary>
 
-`/healthz` bağımlılıkları **kontrol etmez**. Etseydi, Postgres bir anlığına
-düştüğünde orkestratör sağlıklı uygulama süreçlerini de yeniden başlatırdı —
-kısa bir veritabanı kesintisi tüm filoyu çökertirdi. `/readyz` kontrol eder ve
-503 döner: yük dengeleyici trafiği keser, süreç öldürülmez.
+`/healthz` does **not** check dependencies. If it did, a momentary Postgres outage would
+make the orchestrator restart perfectly healthy application processes — a brief database
+blip would take down the whole fleet. `/readyz` does check, and returns 503: the load
+balancer stops sending traffic, the process is not killed.
 </details>
 
 <details>
-<summary><b>Neden Netflix yok</b> — kapsam kararı</summary>
+<summary><b>Why no Netflix</b> — a scope decision</summary>
 
-Netflix, Disney+ ve HBO Max Widevine/PlayReady DRM kullanır; ekran paylaşımı
-siyah ekran verir ve DRM'i dolanmak hem DMCA §1201 ihlali hem de kullanıcıyı
-dağıtım sorumluluğuna sokar. Bu bir mühendislik problemi değil, lisans
-problemidir.
+Netflix, Disney+ and HBO Max use Widevine/PlayReady DRM; screen sharing produces a black
+frame, and circumventing DRM is both a DMCA §1201 violation and something that exposes
+the user to distribution liability. That is a licensing problem, not an engineering one.
 
-Kapsam dışı bırakmak DRM duvarını, hukuki riski ve extension kırılganlığını
-aynı anda ortadan kaldırdı — öğrenme değerinin %100'ünü koruyarak, çünkü zor
-kısımlar zaten backend tarafındaydı.
+Leaving it out of scope removed the DRM wall, the legal risk and the fragility of a
+browser extension all at once — while keeping 100% of the learning value, because the
+hard parts were on the backend anyway.
 </details>
 
 ---
 
-## Proje yapısı
+## Project layout
 
 ```
 src/
-├── shared/            Tüm servislerin paylaştığı altyapı
-│   ├── protocol-core.ts  saf tipler + drift/saat matematiği (tarayıcıya da derlenir)
-│   ├── protocol.ts       + zod doğrulama şemaları (yalnızca sunucu)
-│   ├── config.ts         bölümlenmiş, zod ile doğrulanan ortam değişkenleri
-│   ├── queue.ts          elle yazılmış iş kuyruğu (Lua claim, DLQ, reaper)
-│   ├── ticket.ts         tek kullanımlık WebSocket bileti
+├── shared/            infrastructure shared by every service
+│   ├── protocol-core.ts  pure types + drift/clock maths (also compiled for the browser)
+│   ├── protocol.ts       + zod validation schemas (server only)
+│   ├── config.ts         partitioned environment variables, validated with zod
+│   ├── queue.ts          hand-written job queue (Lua claim, DLQ, reaper)
+│   ├── ticket.ts         single-use WebSocket ticket
 │   ├── db.ts · redis.ts · storage.ts · media.ts · metrics.ts · logger.ts
 │   └── password.ts · jwt.ts · errors.ts
 ├── api/               stateless REST
-├── realtime/          stateful WebSocket — room.ts içinde Redis Lua betikleri
+├── realtime/          stateful WebSocket — Redis Lua scripts live in room.ts
 └── worker/            ffprobe + ffmpeg → HLS
 
-ops/       prometheus · grafana panosu (kod olarak) · k6 senaryosu
-docs/      yük testi analizi · Faz 3 kırılma öncesi/sonrası ham çıktılar
-scripts/   migration aracı + dört test paketi
+ops/       prometheus · grafana dashboard (as code) · k6 scenario
+docs/      load-test analysis · phase 3 before/after raw output
+scripts/   migration tool + four test suites
 ```
 
 ---
 
-## Bu proje neyi kanıtlıyor
+## What this project demonstrates
 
-| Yetkinlik | Kanıt |
+| Skill | Evidence |
 |---|---|
-| Stateful gerçek zamanlı sistemler | WebSocket oda motoru, presence, reconnect, ölü bağlantı avcısı |
-| Dağıtık sistemler | Redis Lua ile atomik geçiş, Pub/Sub, versiyonlama, lider seçimi, kalp atışı |
-| Asenkron iş işleme | Elle yazılmış kuyruk: at-least-once, idempotency, DLQ, visibility timeout |
-| Ölçekleme | Kırılmanın **ölçülmesi**, çözülmesi ve **tekrar ölçülmesi** |
-| Gözlemlenebilirlik | Prometheus, kod olarak Grafana panosu, k6, hipotez-ölçüm döngüsü |
-| Güvenlik bilinci | Tek kullanımlık bilet, kullanıcı numaralandırma, düşman girdi olarak yükleme |
-| Üretim hazırlığı | Çok aşamalı imaj, root olmayan kullanıcı, CI, nazik kapanış |
-| Mühendislik yargısı | Neyi **yapmamaya** karar verdiğini gerekçesiyle anlatabilmek |
+| Stateful real-time systems | WebSocket room engine, presence, reconnect, dead-connection reaper |
+| Distributed systems | atomic transitions in Redis Lua, Pub/Sub, versioning, leader selection, heartbeats |
+| Asynchronous job processing | hand-written queue: at-least-once, idempotency, DLQ, visibility timeout |
+| Scaling | **measuring** the break, fixing it, and **measuring again** |
+| Observability | Prometheus, Grafana dashboard as code, k6, a hypothesis-and-measure loop |
+| Security awareness | single-use tickets, user enumeration, uploads treated as adversarial input |
+| Production readiness | multi-stage image, non-root user, CI, graceful shutdown |
+| Engineering judgement | being able to explain what you decided **not** to build, and why |
 
 ---
 
-## Bilinen sınırlar
+## Known limits
 
-- Tüm bileşenler tek makinede ölçüldü; gerçek dağıtımda ağ gecikmesi eklenir.
-- Redis tek düğüm. Instance sayısı arttıkça `PUBLISH` fan-out'u doğrusal büyür;
-  sonraki adım oda→instance yönlendirmesi (consistent hashing) veya Redis Cluster.
-- Sesli sohbet (WebRTC) kapsam dışı bırakıldı. Mesh P2P ≤5 katılımcıya kadar
-  çalışır; ötesinde SFU gerekir ve bu ayrı bir projedir.
-- Yük testi k6 tek konteynerde 2.500 VU'dan sonra kendi darboğazına giriyor —
-  daha yükseği için birden fazla üreteç gerekir.
+- Everything was measured on a single machine; a real deployment adds network latency.
+- Redis is a single node. As the instance count grows the `PUBLISH` fan-out grows
+  linearly; the next step would be room→instance routing (consistent hashing) or Redis
+  Cluster.
+- Voice chat (WebRTC) was left out of scope. Mesh P2P works up to ~5 participants;
+  beyond that an SFU is needed, and that is a separate project.
+- The load test hits its own bottleneck past 2,500 VUs in a single k6 container —
+  going higher needs multiple generators.
 
-Yol haritası ve faz faz gerekçeler: [`ROADMAP.md`](./ROADMAP.md)
+Roadmap and the reasoning phase by phase: [`ROADMAP.md`](./ROADMAP.md)
