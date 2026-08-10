@@ -226,7 +226,14 @@ export class BrowserSession {
   /** Son izleyici ayrıldı: hemen kapatmıyoruz, kısa süre bekliyoruz. */
   scheduleIdleClose(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => { void this.close(); }, cfg.BROWSER_IDLE_MS);
+    this.idleTimer = setTimeout(() => {
+      void this.close().then(() => {
+        // Kaydı da düşür. Yalnızca sayfayı kapatmak yetmiyordu: kayıt haritada
+        // kalıyor, kapasite sayacı doluyor ve servis bir süre sonra hiçbir yeni
+        // odayı kabul etmiyordu.
+        if (this.viewers.size === 0) sessions.delete(this.slug);
+      });
+    }, cfg.BROWSER_IDLE_MS);
     this.idleTimer.unref();
   }
 
@@ -276,14 +283,18 @@ export function normalizeUrl(raw: string): string | null {
 export const sessions = new Map<string, BrowserSession>();
 
 export function sessionFor(slug: string): BrowserSession {
-  let s = sessions.get(slug);
-  if (!s) {
-    if (sessions.size >= cfg.BROWSER_MAX_SESSIONS) {
-      throw new Error(`Aynı anda en fazla ${cfg.BROWSER_MAX_SESSIONS} oda ortak tarayıcı kullanabilir`);
-    }
-    s = new BrowserSession(slug);
-    sessions.set(slug, s);
+  const existing = sessions.get(slug);
+  if (existing) return existing;
+
+  // Tavan AÇIK sekmeleri sınırlar, kayıt sayısını değil. Sayfası kapalı bir
+  // kayıt Chrome kaynağı tüketmiyor; onu saymak kapasiteyi boş yere doldurur.
+  const open = [...sessions.values()].filter((s) => s.active).length;
+  if (open >= cfg.BROWSER_MAX_SESSIONS) {
+    throw new Error(`Aynı anda en fazla ${cfg.BROWSER_MAX_SESSIONS} oda ortak tarayıcı kullanabilir`);
   }
+
+  const s = new BrowserSession(slug);
+  sessions.set(slug, s);
   return s;
 }
 

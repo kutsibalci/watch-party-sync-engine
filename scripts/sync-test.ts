@@ -555,6 +555,29 @@ await check('Bayat saat örnekleri tahmine karışmıyor', async () => {
   return 'bayat elendi, tamamı bayatken geri düşüş çalışıyor';
 });
 
+await check('Sürüklenen saatte tahmin güncel kalıyor', async () => {
+  const now = Date.now();
+  // Ölçtüğümüz bozuk ortam: sunucu saati saniyede ~100 ms kaçıyor.
+  // 2 saniyede bir örnek, 60 saniyelik seri.
+  const samples: ClockSample[] = Array.from({ length: 30 }, (_, i) => ({
+    offsetMs: -3000 + i * 200,
+    rttMs: 2,
+    atMs: now - (30 - i) * 2000,
+  }));
+  const guncel = samples[samples.length - 1]!.offsetMs;
+
+  // Tüm pencerenin medyanı yarım dakika geriyi gösterirdi.
+  const genisMedyan = [...samples].map((s) => s.offsetMs).sort((a, b) => a - b)[15]!;
+  assert(Math.abs(genisMedyan - guncel) > 2000, 'kurgu geçersiz: geniş medyan zaten güncel');
+
+  const est = bestSample(samples, now)!;
+  assert(
+    Math.abs(est.offsetMs - guncel) < 500,
+    `tahmin geride kaldı: ${est.offsetMs}ms (güncel ${guncel}ms)`,
+  );
+  return `tahmin ${est.offsetMs}ms · güncel ${guncel}ms · geniş medyan ${genisMedyan}ms olurdu`;
+});
+
 await check('Negatif RTT\'li örnek eleniyor', async () => {
   const now = Date.now();
   // Sunucu t1 ile t2 arasında takılırsa RTT negatif çıkar ve offset yarısı

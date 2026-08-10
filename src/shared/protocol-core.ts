@@ -143,6 +143,19 @@ export function computeClockSample(
 const RTT_TOLERANCE = 2;
 
 /**
+ * Medyanın alınacağı en yeni örnek sayısı.
+ *
+ * Pencerenin TAMAMININ medyanını almak sürüklenme altında yanlış: sunucu saati
+ * kayıyorsa geniş pencerenin medyanı pencerenin ORTASINDAKİ offset'i döndürür,
+ * yani kasten eski bir değeri. Ölçtüğümüz bir ortamda saat saniyede ~100 ms
+ * kaçıyordu; 120 saniyelik medyan bir dakika geriyi gösterirdi.
+ *
+ * Beşi, 30 saniyede bir atılan üçlü ping turunun yaklaşık son bir buçuk turu:
+ * hem güncel hem de iki aykırı örneği yutacak kadar geniş.
+ */
+const MEDIAN_WINDOW = 5;
+
+/**
  * Saat farkı tahmini: düşük gecikmeli TAZE örneklerin MEDYANI.
  *
  * Önceki sürüm tek bir örneği seçiyordu: en düşük RTT'li olanı. Gerekçe
@@ -156,8 +169,10 @@ const RTT_TOLERANCE = 2;
  * Medyan bu tür aykırı değerlere dayanıklı; düşük RTT filtresi de jitter
  * korumasını koruyor.
  *
- * Tazelik şart: eskiden tüm geçmiş taranıyordu ve dakikalarca önce yakalanmış
- * şanslı bir örnek sonsuza kadar kazanabiliyordu.
+ * Medyan yalnızca EN YENİ birkaç örnekten alınır (MEDIAN_WINDOW). Geniş
+ * pencerenin medyanı, saat kayıyorsa pencerenin ortasındaki değeri döndürür -
+ * yani bilerek eski bir tahmin. Tazelik penceresi bayat örnekleri eler,
+ * medyan penceresi de tahmini güncel tutar.
  *
  * Not: saati sürekli sıçrayan bir sunucuyu hiçbir istemci düzeltemez; bu
  * altyapı arızasıdır. Buradaki iş tek tük aykırı örneğe teslim olmamak.
@@ -178,7 +193,10 @@ export function bestSample(
   const usable = sane.length > 0 ? sane : pool;
 
   const minRtt = Math.min(...usable.map((s) => s.rttMs));
-  const lowJitter = usable.filter((s) => s.rttMs <= Math.max(minRtt * RTT_TOLERANCE, minRtt + 5));
+  const lowJitter = usable
+    .filter((s) => s.rttMs <= Math.max(minRtt * RTT_TOLERANCE, minRtt + 5))
+    .sort((a, b) => a.atMs - b.atMs)
+    .slice(-MEDIAN_WINDOW);
 
   const offsets = lowJitter.map((s) => s.offsetMs).sort((a, b) => a - b);
   const mid = offsets.length >> 1;

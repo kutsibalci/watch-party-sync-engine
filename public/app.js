@@ -548,6 +548,8 @@ globalThis.__sync = () => {
     offsetMs: clockOffsetMs,
     version: state.version,
     isPlaying: state.isPlaying,
+    // Ham örnekler: sunucu saatinin kararlı olup olmadığını buradan anlıyoruz.
+    samples: clockSamples.map((s) => ({ o: s.offsetMs, t: s.atMs })),
   };
 };
 
@@ -645,12 +647,25 @@ function announceMedia() {
   }
 }
 
+/**
+ * Eş bağlantılarını son bilinen katılımcı listesine göre tazeler.
+ *
+ * Yalnızca PRESENCE geldiğinde çağırmak yetmiyordu: mesh.sync, iki taraftan
+ * hiçbirinde medya yoksa bağlantı kurmaz. Yerel akış PRESENCE'tan SONRA
+ * hazır olursa (getUserMedia yavaş kaldığında) sync bir daha çalışmıyor ve
+ * bağlantı hiç kurulmuyordu. Yerel akış her değiştiğinde de çağırıyoruz.
+ */
+function syncPeers() {
+  mesh.sync(lastMembers.filter((m) => m.connectionId !== selfConnectionId));
+}
+
 /** Mikrofon/kamera durumuna göre yerel akışı yeniden kurar. */
 async function refreshLocalStream() {
   if (media.screen) return;  // ekran paylaşımı kendi akışını yönetiyor
 
   if (!media.mic && !media.cam) {
     await mesh.setLocalStream(null);
+    syncPeers();
     renderTiles();
     return;
   }
@@ -660,24 +675,27 @@ async function refreshLocalStream() {
       video: media.cam ? { width: 640, height: 480 } : false,
     });
     await mesh.setLocalStream(stream);
+    syncPeers();
     renderTiles();
   } catch (e) {
     media.mic = false; media.cam = false;
-    announceMedia();
     addSystem(`Cihaza erişilemedi: ${e.message}`);
   }
 }
 
-$('btn-mic').onclick = async () => { media.mic = !media.mic; announceMedia(); await refreshLocalStream(); };
-$('btn-cam').onclick = async () => { media.cam = !media.cam; announceMedia(); await refreshLocalStream(); };
+// Önce akışı al, SONRA duyur. Ters sırada duyuru odaya "bende kamera var"
+// derken elimizde henüz akış olmuyor; dönen PRESENCE ile sync çalışıyor ama
+// kuracak bir şey bulamıyordu. CI'da tam olarak bu oldu.
+$('btn-mic').onclick = async () => { media.mic = !media.mic; await refreshLocalStream(); announceMedia(); };
+$('btn-cam').onclick = async () => { media.cam = !media.cam; await refreshLocalStream(); announceMedia(); };
 
 $('btn-screen').onclick = async () => {
   if (media.screen) {
     media.screen = false;
-    announceMedia();
     $('screen-view').hidden = true;
     $('screen-view').srcObject = null;
     await refreshLocalStream();
+    announceMedia();
     return;
   }
   try {
@@ -689,9 +707,10 @@ $('btn-screen').onclick = async () => {
     stream.getVideoTracks()[0].onended = () => { if (media.screen) $('btn-screen').click(); };
 
     media.screen = true;
-    announceMedia();
     await mesh.setLocalStream(stream);
+    syncPeers();
     showScreenStage(stream);
+    announceMedia();
   } catch (e) {
     if (e.name !== 'NotAllowedError') addSystem(`Ekran paylaşılamadı: ${e.message}`);
   }
@@ -842,7 +861,7 @@ function renderMembers(members) {
   }).join('');
 
   const peers = members.filter((m) => m.connectionId !== selfConnectionId);
-  mesh.sync(peers);
+  syncPeers();
   routeScreenShare(members);
   renderTiles();
 
