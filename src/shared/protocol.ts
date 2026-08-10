@@ -95,6 +95,10 @@ export const BrowserClientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('BROWSER_START'), url: z.string().min(1).max(2048) }),
   z.object({ type: z.literal('BROWSER_NAV'), url: z.string().min(1).max(2048) }),
   z.object({ type: z.literal('BROWSER_STOP') }),
+  // Geri/ileri/yenile olmayan bir tarayıcı yarım tarayıcıdır.
+  z.object({ type: z.literal('BROWSER_BACK') }),
+  z.object({ type: z.literal('BROWSER_FORWARD') }),
+  z.object({ type: z.literal('BROWSER_RELOAD') }),
 
   z.object({
     type: z.literal('BROWSER_MOUSE'),

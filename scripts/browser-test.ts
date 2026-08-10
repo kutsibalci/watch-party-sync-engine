@@ -173,10 +173,15 @@ try {
     p.on('pageerror', (e: unknown) => {
       consoleErrors.push(`${label}: ${e instanceof Error ? e.message : String(e)}`);
     });
+    // Metne bakmak yetmiyordu: "Failed to load resource: net::ERR_SSL_PROTOCOL_ERROR"
+    // içinde alan adı geçmiyor ve YouTube'un kendi kaynağı bizim hatamız gibi
+    // görünüyordu. Hatanın KAYNAK ADRESİNE bakıyoruz.
+    const FOREIGN = /youtube|ytimg|googlevideo|doubleclick|googleads|google\.com|gstatic/i;
     p.on('console', (m) => {
-      if (m.type() === 'error' && !m.text().includes('youtube')) {
-        consoleErrors.push(`${label}: ${m.text()}`);
-      }
+      if (m.type() !== 'error') return;
+      const from = m.location()?.url ?? '';
+      if (FOREIGN.test(from) || FOREIGN.test(m.text())) return;
+      consoleErrors.push(`${label}: ${m.text()}${from ? ` (${from})` : ''}`);
     });
   }
 
@@ -406,7 +411,10 @@ try {
       pageA.evaluate(() => (globalThis as any).__sync?.()),
       pageB.evaluate(() => (globalThis as any).__sync?.()),
     ]);
-    assert(a && b, `senkron kancası okunamadı: ${JSON.stringify({ a, b })}`);
+    assert(
+      a?.targetMs != null && b?.targetMs != null,
+      `senkron kancası okunamadı: ${JSON.stringify({ a, b })}`,
+    );
 
     const anchor = (s: { targetMs: number; atMs: number }) => s.targetMs - s.atMs;
     const delta = Math.abs(anchor(a) - anchor(b));
@@ -476,12 +484,28 @@ try {
   });
   }; // playerChecks sonu
 
-  if (youtubeReady) {
+  /**
+   * iframe'in belirmesi yeterli bir kapı DEĞİL — bu ders bu dosyada bir kez
+   * öğrenildi ama yalnızca drift testine uygulanmıştı. YouTube'un alt
+   * kaynakları düşerse (bu makinede ERR_SSL_PROTOCOL_ERROR) iframe yerleşir,
+   * oynatıcı ise hiç hazır olmaz ve telemetri tablosu boş kalır.
+   * Oynatıcının KENDİSİNİ soruyoruz.
+   */
+  const playerReady = youtubeReady && (await Promise.all(
+    [pageA, pageB].map((p) => p
+      .waitForFunction(() => (globalThis as any).__sync?.()?.ready === true,
+        { timeout: 20_000, polling: 250 })
+      .then(() => true)
+      .catch(() => false)),
+  )).every(Boolean);
+
+  if (playerReady) {
     await playerChecks();
   } else {
-    skip('A oynat dedi → B de oynatmaya geçti', 'oynatıcı yok');
-    skip('İki sekmenin hedef pozisyonu birbirine yakın (< 250ms)', 'oynatıcı yok');
-    skip('Drift düzeltmesi çalışıyor ve sapma sınırlı', 'oynatıcı yok');
+    const reason = youtubeReady ? 'oynatıcı hazır olmadı (dış kaynak)' : 'oynatıcı yok';
+    skip('A oynat dedi → B de oynatmaya geçti', reason);
+    skip('İki sekme aynı zaman çizgisinde (< 250ms)', reason);
+    skip('Sekme öne gelince drift düzeltmesi toparlıyor', reason);
   }
 
   // Bu kontrol oynatıcıdan BAĞIMSIZ: versiyon sunucudan gelir ve telemetri
@@ -592,7 +616,8 @@ try {
   if (!browserSvc) {
     skip('Ortak tarayıcı iki sekmede de çiziliyor', 'servis çalışmıyor (npm run dev:browser)');
     skip('Ortak tarayıcıyı yalnızca oda kurucusu sürüyor', 'servis çalışmıyor');
-    skip('Adres çubuğuna yazılan arama sonuç sayfasını açıyor', 'servis çalışmıyor');
+    skip('Adres çubuğu arama yapıyor, geri düğmesi geçmişi geziyor', 'servis çalışmıyor');
+    skip('Ortak tarayıcıdan YouTube linkiyle videoya dönülüyor', 'servis çalışmıyor');
   } else {
     await check('Ortak tarayıcı iki sekmede de çiziliyor', async () => {
       await click(pageA, '#btn-browser');            // A host
@@ -639,9 +664,12 @@ try {
       return 'arayüz kilitli, sunucu da reddediyor';
     });
 
-    await check('Adres çubuğuna yazılan arama sonuç sayfasını açıyor', async () => {
+    const addressBar = (page: Page) =>
+      page.$eval('#stage-url', (el) => (el as HTMLInputElement).value);
+
+    await check('Adres çubuğu arama yapıyor, geri düğmesi geçmişi geziyor', async () => {
       await pageA.$eval('#stage-url', (el) => {
-        (el as HTMLInputElement).value = 'birlikte izleme';
+        (el as HTMLInputElement).value = 'vikipedi';
       });
       await click(pageA, '#btn-stage-url');
       // Google sunucu tarayıcılarını engellediği için arama DuckDuckGo'ya gider.
@@ -650,9 +678,54 @@ try {
           (document.getElementById('stage-url') as HTMLInputElement).value),
         { timeout: 25_000, polling: 500 },
       ).then(() => true).catch(() => false);
-      assert(searched, 'arama sonuç sayfasına gidilmedi');
-      await click(pageA, '#btn-browser');   // ortak tarayıcıyı kapat
-      return 'arama açıldı';
+      assert(searched, `arama sonuç sayfasına gidilmedi: ${await addressBar(pageA)}`);
+
+      await click(pageA, '#btn-bw-reload');
+      await sleep(3000);
+      assert(/duckduckgo/.test(await addressBar(pageA)), 'yenileme adresi bozdu');
+      return 'arama açıldı, yenileme çalışıyor';
+    });
+
+    /**
+     * Kullanıcının çarptığı hata: ortak tarayıcı açıkken YouTube'a geçince
+     * video canvas'ın ARKASINDA oynuyordu ve "video oynamıyor" gibi görünüyordu.
+     * Artık YouTube bağlantısı her zaman videoya geçirir ve sahneyi devralır.
+     */
+    await check('Ortak tarayıcıdan YouTube linkiyle videoya dönülüyor', async () => {
+      assert(
+        await pageA.evaluate(() => (globalThis as any).__sync?.()?.browserActive === true),
+        'önkoşul: ortak tarayıcı açık olmalıydı',
+      );
+
+      await pageA.$eval('#stage-url', (el) => {
+        (el as HTMLInputElement).value = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+      });
+      await click(pageA, '#btn-stage-url');
+
+      const handed = await pageA.waitForFunction(
+        () => {
+          const canvas = document.getElementById('browser-view') as HTMLCanvasElement | null;
+          const label = document.getElementById('source-label')?.textContent ?? '';
+          return canvas?.hidden === true && label.includes('dQw4w9WgXcQ');
+        },
+        { timeout: 20_000, polling: 250 },
+      ).then(() => true).catch(() => false);
+
+      const durum = await pageA.evaluate(() => ({
+        canvasGizli: (document.getElementById('browser-view') as HTMLCanvasElement).hidden,
+        oynaticiGizli: (document.getElementById('player') as HTMLElement).hidden,
+        kaynak: document.getElementById('source-label')?.textContent,
+      }));
+      assert(handed, `sahne devredilmedi: ${JSON.stringify(durum)}`);
+      assert(!durum.oynaticiGizli, 'oynatıcı katmanı açılmadı');
+
+      // Karşı taraf da aynı kaynağa geçmeli.
+      const bDe = await pageB.waitForFunction(
+        () => (document.getElementById('source-label')?.textContent ?? '').includes('dQw4w9WgXcQ'),
+        { timeout: 10_000, polling: 250 },
+      ).then(() => true).catch(() => false);
+      assert(bDe, 'B kaynak değişimini görmedi');
+      return 'canvas kapandı, oynatıcı devraldı, B de geçti';
     });
   }
 

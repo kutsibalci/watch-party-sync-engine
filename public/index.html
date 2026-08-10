@@ -243,12 +243,18 @@
   <main class="room">
     <div class="stage-col">
       <div class="linkbar">
+        <div id="nav-buttons" class="nav-buttons is-hidden">
+          <button id="btn-bw-back" class="btn btn-quiet btn-icon" title="Geri">‹</button>
+          <button id="btn-bw-fwd" class="btn btn-quiet btn-icon" title="İleri">›</button>
+          <button id="btn-bw-reload" class="btn btn-quiet btn-icon" title="Yenile">⟳</button>
+        </div>
         <span id="linkbar-icon" class="linkbar-icon">▶</span>
         <input id="stage-url" type="text" spellcheck="false"
                placeholder="YouTube bağlantısını buraya yapıştır ve Enter'a bas" />
         <button id="btn-stage-url" class="btn btn-primary btn-sm">Oynat</button>
         <button id="btn-source" class="btn btn-quiet btn-sm">Diğer kaynaklar</button>
       </div>
+      <div id="bw-progress" class="bw-progress is-hidden"><span></span></div>
       <p id="browser-hint" class="muted small linkbar-hint"></p>
 
       <div class="stage">

@@ -14,7 +14,7 @@
 const PAGE_W = 1280;
 const PAGE_H = 720;
 
-export function createSharedBrowser({ canvas, wsBase, getTicket, onState, onUrl, onError }) {
+export function createSharedBrowser({ canvas, wsBase, getTicket, onState, onUrl, onLoading, onError }) {
   const ctx = canvas.getContext('2d', { alpha: false });
   canvas.width = PAGE_W;
   canvas.height = PAGE_H;
@@ -81,6 +81,7 @@ export function createSharedBrowser({ canvas, wsBase, getTicket, onState, onUrl,
       try { msg = JSON.parse(ev.data); } catch { return; }
       if (msg.type === 'BROWSER_STATE') onState?.(msg);
       else if (msg.type === 'BROWSER_URL') onUrl?.(msg.url);
+      else if (msg.type === 'BROWSER_LOADING') onLoading?.(msg.loading);
       else if (msg.type === 'BROWSER_ERROR' || msg.type === 'BROWSER_DENIED') onError?.(msg.message);
     };
 
@@ -176,6 +177,9 @@ export function createSharedBrowser({ canvas, wsBase, getTicket, onState, onUrl,
     start: (url) => send({ type: 'BROWSER_START', url }),
     navigate: (url) => send({ type: 'BROWSER_NAV', url }),
     stop: () => send({ type: 'BROWSER_STOP' }),
+    back: () => drive({ type: 'BROWSER_BACK' }),
+    forward: () => drive({ type: 'BROWSER_FORWARD' }),
+    reload: () => drive({ type: 'BROWSER_RELOAD' }),
     setDriver(yes) {
       canDrive = Boolean(yes);
       canvas.classList.toggle('is-readonly', !canDrive);

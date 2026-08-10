@@ -92,6 +92,7 @@ export class BrowserSession {
   private cdp: CDPSession | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private starting: Promise<void> | null = null;
+  private loading = false;
 
   readonly viewers = new Set<Viewer>();
   currentUrl = '';
@@ -178,6 +179,11 @@ export class BrowserSession {
       this.broadcast({ type: 'BROWSER_URL', url: this.currentUrl });
     });
 
+    // Sayfa İÇİNDEN tıklanan bağlantılar goto'dan geçmez; yükleniyor
+    // göstergesini onlar için de doğru tutmak gerekiyor.
+    cdp.on('Page.frameStartedLoading', () => this.setLoading(true));
+    cdp.on('Page.frameStoppedLoading', () => this.setLoading(false));
+
     await cdp.send('Page.enable');
     await cdp.send('Page.startScreencast', {
       format: 'jpeg',
@@ -202,6 +208,7 @@ export class BrowserSession {
 
     const previous = this.currentUrl;
     this.currentUrl = url;
+    this.setLoading(true);
 
     try {
       await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
@@ -213,7 +220,38 @@ export class BrowserSession {
       this.currentUrl = previous;
       this.broadcast({ type: 'BROWSER_ERROR', message });
       this.broadcast({ type: 'BROWSER_URL', url: previous });
+    } finally {
+      this.setLoading(false);
     }
+  }
+
+  /** Sayfa yükleniyor mu — istemcide ince bir çubuk olarak görünüyor. */
+  private setLoading(on: boolean): void {
+    if (this.loading === on) return;
+    this.loading = on;
+    this.broadcast({ type: 'BROWSER_LOADING', loading: on });
+  }
+
+  /** Geri/ileri/yenile. Geçmişin ucundaysak puppeteer null döner, sorun değil. */
+  async back(): Promise<void> {
+    if (!this.page) return;
+    this.setLoading(true);
+    await this.page.goBack({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {});
+    this.setLoading(false);
+  }
+
+  async forward(): Promise<void> {
+    if (!this.page) return;
+    this.setLoading(true);
+    await this.page.goForward({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {});
+    this.setLoading(false);
+  }
+
+  async reload(): Promise<void> {
+    if (!this.page) return;
+    this.setLoading(true);
+    await this.page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {});
+    this.setLoading(false);
   }
 
   async mouse(evt: {

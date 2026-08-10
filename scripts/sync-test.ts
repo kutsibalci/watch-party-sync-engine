@@ -238,11 +238,13 @@ await check('Saat senkronu: offset ve RTT ölçülebiliyor', async () => {
   assert(Number.isFinite(sample.offsetMs), 'offset sayı değil');
   assert(sample.rttMs >= 0, `RTT negatif: ${sample.rttMs}`);
   assert(sample.rttMs < 2000, `RTT mantıksız yüksek: ${sample.rttMs}`);
-  // Sunucu ve istemci aynı makinede, gerçek fark sıfıra yakın. Ama makine
-  // yüklüyken istemcinin zaman damgaları olay döngüsünde gecikir ve tahmin
-  // gürültülenir; dar bir eşik testi rastgele kırar. Amaç kırık bir hesabı
-  // (işaret hatası, birim karışması) yakalamak, hassasiyet belgelemek değil.
-  assert(Math.abs(sample.offsetMs) < 2000, `offset mantıksız: ${sample.offsetMs}`);
+  // Amaç kırık bir hesabı (işaret hatası, birim karışması) yakalamak,
+  // hassasiyet belgelemek değil. Eşik bilerek geniş: sunucunun saati sabit
+  // varsayılamaz — bu makinede Docker VM'inin saati saniyede ~84 ms kaçıp
+  // periyodik olarak ~2,6 s geri çekiliyordu ve dar eşik rastgele kırılıyordu.
+  // Senkronun gerçek doğruluğu iki istemcinin BİRBİRİNE yakınsamasıyla
+  // ölçülüyor (tarayıcı testi), mutlak offset'le değil.
+  assert(Math.abs(sample.offsetMs) < 30_000, `offset mantıksız: ${sample.offsetMs}`);
   return `offset ${sample.offsetMs.toFixed(1)}ms · rtt ${sample.rttMs.toFixed(1)}ms`;
 });
 

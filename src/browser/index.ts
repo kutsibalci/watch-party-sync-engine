@@ -159,6 +159,15 @@ async function handleConnection(socket: WebSocket, req: FastifyRequest): Promise
       case 'BROWSER_KEY':
         await session.key(msg);
         return;
+      case 'BROWSER_BACK':
+        await session.back();
+        return;
+      case 'BROWSER_FORWARD':
+        await session.forward();
+        return;
+      case 'BROWSER_RELOAD':
+        await session.reload();
+        return;
       case 'BROWSER_STOP':
         await session.close();
         session.broadcastState(displayName);

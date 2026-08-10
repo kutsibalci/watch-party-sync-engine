@@ -127,33 +127,71 @@ const hlsAdapter = {
   getRate: () => $('video').playbackRate,
 };
 
+/**
+ * Sahnede aynı anda TEK katman durur.
+ *
+ * Dört katman (YouTube iframe'i, HLS videosu, ekran paylaşımı, ortak tarayıcı)
+ * beş ayrı yerden açılıp kapanıyordu ve birbirlerinden habersizdi. Sonuç:
+ * ortak tarayıcı açıkken YouTube'a geçince video canvas'ın ARKASINDA
+ * oynuyordu — "video oynamıyor" diye görünen şey buydu. Artık tek kapı var.
+ */
+const STAGE_LAYERS = {
+  youtube: 'player',
+  hls: 'video',
+  screen: 'screen-view',
+  browser: 'browser-view',
+};
+let stageLayer = 'empty';
+
+function showStage(kind) {
+  stageLayer = kind;
+  for (const [name, id] of Object.entries(STAGE_LAYERS)) {
+    const el = $(id);
+    if (el) el.hidden = name !== kind;
+  }
+  $('stage-empty').classList.toggle('is-hidden', kind !== 'empty');
+}
+
+/**
+ * YouTube gömülü oynatıcısı dış bir servistir; yüklenmeyebilir (ağ engeli,
+ * SSL hatası, reklam engelleyici). Sessizce boş sahnede bırakmak en kötüsü —
+ * bir kez uyarıp alternatifi söylüyoruz.
+ */
+let ytWarnTimer = null;
+function warnIfYouTubeStalls() {
+  if (ytWarnTimer) return;
+  ytWarnTimer = setTimeout(() => {
+    ytWarnTimer = null;
+    if (ytReady) return;
+    addSystem('YouTube oynatıcısı yüklenemedi. "Diğer kaynaklar" ile kendi videonu ya da ortak tarayıcıyı kullanabilirsin.');
+  }, 8000);
+}
+
 function mountSource(source, startAtMs, shouldPlay) {
   if (!source) return;
-  $('stage-empty').classList.add('is-hidden');
 
   if (source.type === 'youtube') {
+    showStage('youtube');
     if (activeKind !== 'youtube') {
       if (hls) { hls.destroy(); hls = null; }
-      $('video').hidden = true;
       $('video').removeAttribute('src');
       activeKind = 'youtube';
       player = youtubeAdapter;
       supportsFineRate = null;
     }
-    if (!ytReady) return;
+    // Etiketi HER ZAMAN yaz: oynatıcı gelmese bile ne seçildiği görünsün.
+    $('source-label').textContent = `youtube · ${source.videoId}`;
+    if (!ytReady) { warnIfYouTubeStalls(); return; }
     if (ytPlayer.getVideoData?.()?.video_id !== source.videoId) {
       ytPlayer.loadVideoById(source.videoId, startAtMs / 1000);
       if (!shouldPlay) ytPlayer.pauseVideo();
     }
-    $('source-label').textContent = `youtube · ${source.videoId}`;
     return;
   }
 
+  showStage('hls');
   const video = $('video');
   if (activeKind !== 'hls' || video.dataset.src !== source.url) {
-    const ytEl = $('player');
-    if (ytEl) ytEl.hidden = true;
-    video.hidden = false;
     activeKind = 'hls';
     player = hlsAdapter;
     supportsFineRate = null;
@@ -282,22 +320,35 @@ for (const opt of document.querySelectorAll('[data-source]')) {
 }
 
 // Sahnenin üstündeki bağlantı çubuğu: kaynak sayfasını açmadan YouTube geçir.
-function playPastedLink() {
+/**
+ * Tek kutu, iki iş — ama karar kullanıcıya bırakılmıyor.
+ *
+ * YouTube bağlantısı HER ZAMAN "birlikte izleyelim" demektir: ortak tarayıcı
+ * açıksa bile kapatıp videoya geçiyoruz. Önceden link sanal tarayıcıya
+ * gidiyordu; kullanıcı video bekleyip YouTube'un web sayfasını buluyordu.
+ *
+ * YouTube olmayan her şey (adres ya da arama) ortak tarayıcıya gider; kapalıysa
+ * açılır. "Bu YouTube değil" deyip kullanıcıyı geri çevirmenin anlamı yok.
+ */
+async function playPastedLink() {
   const raw = $('stage-url').value.trim();
   if (!raw) return;
   if (!slug) return toast('Önce bir odaya gir');
 
-  // Ortak tarayıcı açıkken aynı kutu adres çubuğu gibi davranır.
-  if (browserActive) { sharedBrowser.navigate(raw); return; }
-
   const ytId = parseYouTubeId(raw);
-  if (!ytId) return toast('Bu bir YouTube bağlantısı değil — başka bir site için "Ortak tarayıcı"');
-  sendMsg({ type: 'SET_SOURCE', source: { type: 'youtube', videoId: ytId } });
-  $('stage-url').value = '';
+  if (ytId) {
+    if (browserActive) sharedBrowser.stop();
+    sendMsg({ type: 'SET_SOURCE', source: { type: 'youtube', videoId: ytId } });
+    $('stage-url').value = '';
+    return;
+  }
+
+  if (browserActive) { sharedBrowser.navigate(raw); return; }
+  await openSharedBrowser(raw);
 }
 
-$('btn-stage-url').onclick = playPastedLink;
-$('stage-url').onkeydown = (e) => { if (e.key === 'Enter') playPastedLink(); };
+$('btn-stage-url').onclick = () => void playPastedLink();
+$('stage-url').onkeydown = (e) => { if (e.key === 'Enter') void playPastedLink(); };
 
 $('btn-source-close').onclick = () => $('source-sheet').classList.add('is-hidden');
 $('btn-create').onclick = () => openSourceSheet('create');
@@ -382,9 +433,10 @@ $('btn-leave').onclick = () => {
   $('video-strip').classList.add('is-hidden');
   sharedBrowser.disconnect();
   browserActive = false;
-  $('browser-view').hidden = true;
   $('btn-browser').dataset.on = 'false';
   $('screen-room').classList.remove('browser-mode');
+  $('bw-progress').classList.add('is-hidden');
+  showStage('empty');
   updateLinkbar();
   slug = ''; state = null; seenVersion = 0;
   showScreen('home');
@@ -539,15 +591,18 @@ setInterval(controlTick, 250);
  * karşılaştırma zamandan bağımsız kalır (target - atMs sabittir).
  */
 globalThis.__sync = () => {
-  if (!state || !state.source || !player?.ready()) return null;
   const atMs = Date.now();
+  // Oynatıcı hazır değilken null dönmek yanlıştı: oda durumu, yetki ve ortak
+  // tarayıcı bilgisi oynatıcıdan bağımsız. Alanlar ayrı ayrı null olabiliyor.
+  const ready = Boolean(state?.source && player?.ready?.());
   return {
     atMs,
-    targetMs: effectivePositionMs(state, atMs + clockOffsetMs),
-    actualMs: player.positionMs(),
+    ready,
+    targetMs: state ? effectivePositionMs(state, atMs + clockOffsetMs) : null,
+    actualMs: ready ? player.positionMs() : null,
     offsetMs: clockOffsetMs,
-    version: state.version,
-    isPlaying: state.isPlaying,
+    version: state?.version ?? null,
+    isPlaying: state?.isPlaying ?? null,
     iAmHost,
     selfConnectionId,
     browserActive,
@@ -717,8 +772,8 @@ $('btn-cam').onclick = () => queueMedia(async () => {
 $('btn-screen').onclick = () => queueMedia(async () => {
   if (media.screen) {
     media.screen = false;
-    $('screen-view').hidden = true;
     $('screen-view').srcObject = null;
+    restoreSourceStage();
     await refreshLocalStream();
     announceMedia();
     return;
@@ -741,10 +796,24 @@ $('btn-screen').onclick = () => queueMedia(async () => {
   }
 });
 
+/**
+ * Canlı bir katman (ekran paylaşımı, ortak tarayıcı) kapanınca odanın asıl
+ * kaynağına dönülür. Yoksa boş sahne.
+ */
+function restoreSourceStage() {
+  if (!state?.source) { showStage('empty'); return; }
+  showStage(state.source.type === 'youtube' ? 'youtube' : 'hls');
+}
+
+/** Canlı katmana geçerken video sesi arkadan gelmesin. */
+function pauseUnderlyingPlayer() {
+  if (player?.ready?.() && player.isPlaying?.()) player.pause();
+}
+
 function showScreenStage(stream) {
-  $('stage-empty').classList.add('is-hidden');
+  pauseUnderlyingPlayer();
+  showStage('screen');
   const el = $('screen-view');
-  el.hidden = false;
   el.srcObject = stream;
   el.muted = true;   // kendi ekranını dinlemek yankı yapar
   void el.play().catch(() => {});
@@ -802,7 +871,10 @@ function renderTiles() {
 function routeScreenShare(members) {
   const sharer = members.find((m) => m.media?.screen && m.connectionId !== selfConnectionId);
   if (!sharer) {
-    if (!media.screen) { $('screen-view').hidden = true; $('screen-view').srcObject = null; }
+    if (!media.screen && stageLayer === 'screen') {
+      $('screen-view').srcObject = null;
+      restoreSourceStage();
+    }
     return;
   }
   const r = remotes.get(sharer.connectionId);
@@ -810,8 +882,8 @@ function routeScreenShare(members) {
   r.screen = true;
   const el = $('screen-view');
   if (el.srcObject !== r.stream) {
-    $('stage-empty').classList.add('is-hidden');
-    el.hidden = false;
+    pauseUnderlyingPlayer();
+    showStage('screen');
     el.srcObject = r.stream;
     el.muted = false;
     void el.play().catch(() => {});
@@ -832,22 +904,32 @@ const sharedBrowser = createSharedBrowser({
   onState: (st) => {
     const was = browserActive;
     browserActive = Boolean(st.active);
-    $('browser-view').hidden = !browserActive;
     $('btn-browser').dataset.on = String(browserActive);
     // Bu modda ortak bir zaman çizgisi yok; oynat/duraklat hiçbir işe yaramaz.
     $('screen-room').classList.toggle('browser-mode', browserActive);
+
     if (browserActive) {
-      $('stage-empty').classList.add('is-hidden');
+      pauseUnderlyingPlayer();
+      showStage('browser');
       $('browser-view').focus();
+      if (st.url) $('stage-url').value = st.url;
       if (!was && st.by) addSystem(`${st.by} ortak tarayıcıyı açtı`);
     } else if (was) {
+      // Kapanınca odanın asıl kaynağına dön; boş ekranda bırakma.
+      restoreSourceStage();
+      $('stage-url').value = '';
       addSystem('Ortak tarayıcı kapatıldı');
     }
     updateLinkbar();
   },
   onUrl: (u) => { if (browserActive && document.activeElement !== $('stage-url')) $('stage-url').value = u; },
+  onLoading: (on) => $('bw-progress').classList.toggle('is-hidden', !on),
   onError: (m) => addSystem(m),
 });
+
+$('btn-bw-back').onclick = () => sharedBrowser.back();
+$('btn-bw-fwd').onclick = () => sharedBrowser.forward();
+$('btn-bw-reload').onclick = () => sharedBrowser.reload();
 
 // Bağlantı çubuğu iki işe birden bakıyor; hangisinde olduğumuz belli olsun.
 // Kaynağı ve ortak tarayıcıyı yalnızca kurucu sürebildiği için, sürücü
@@ -865,10 +947,11 @@ function updateLinkbar() {
     $('btn-browser').disabled = false;
     bar.placeholder = browserActive
       ? 'Adres ya da arama yaz, Enter\'a bas'
-      : 'YouTube bağlantısını buraya yapıştır ve Enter\'a bas';
+      : 'YouTube bağlantısı, adres ya da arama — Enter\'a bas';
   }
-  $('btn-stage-url').textContent = browserActive ? 'Git' : 'Oynat';
+  $('btn-stage-url').textContent = browserActive ? 'Git' : 'Aç';
   $('linkbar-icon').textContent = browserActive ? '🌐' : '▶';
+  $('nav-buttons').classList.toggle('is-hidden', !browserActive || !iAmHost);
   $('browser-hint').textContent = browserActive && !iAmHost
     ? 'Ortak tarayıcıyı oda kurucusu sürüyor'
     : '';
