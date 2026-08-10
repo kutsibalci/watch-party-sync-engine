@@ -412,6 +412,35 @@ input::placeholder { color: var(--text-faint); }
 .accent-b::before { background: linear-gradient(90deg, var(--accent-3), var(--accent)); }
 .card-icon { font-size: 22px; display: block; margin-bottom: 6px; }
 
+/* Odaların */
+.rooms-block { display: flex; flex-direction: column; gap: 14px; }
+.rooms-head { display: flex; align-items: center; gap: 12px; }
+.rooms-head h2 { font-size: 17px; letter-spacing: -.02em; }
+.rooms-head .btn { margin-left: auto; }
+
+.rooms-list {
+  list-style: none; display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+.rooms-list .empty {
+  grid-column: 1 / -1; color: var(--text-faint); font-size: 13.5px;
+  border: 1px dashed var(--line); border-radius: var(--r-lg); padding: 22px; text-align: center;
+}
+
+.room-card {
+  display: flex; flex-direction: column; gap: 6px; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--line-soft);
+  border-radius: var(--r-lg); padding: 14px 16px;
+  transition: border-color .15s, transform .15s, background .15s;
+}
+.room-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--surface-2); transform: translateY(-2px);
+}
+.room-card strong { font-size: 14.5px; letter-spacing: -.01em; }
+.room-card .mono { font-size: 12px; }
+.room-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+
 /* Kitaplık katlanır */
 .library-fold {
   border: 1px solid var(--line-soft); border-radius: var(--r-lg);

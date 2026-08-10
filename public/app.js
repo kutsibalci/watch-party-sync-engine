@@ -216,6 +216,7 @@ function enterHome() {
   $('who-avatar').textContent = initials(me.displayName);
   showScreen('home');
   void refreshVideos();
+  void refreshRooms();
 }
 
 $('btn-register').onclick = async () => {
@@ -331,13 +332,17 @@ $('btn-source-go').onclick = async () => {
   } catch (e) { setStatus('source-status', e.message, 'err'); }
 };
 
+async function enterRoom(s) {
+  await api('POST', `/api/rooms/${s}/join`);   // üyeysen zaten geçiyor
+  const { room } = await api('GET', `/api/rooms/${s}`);
+  await connect(s, room.name);
+}
+
 $('btn-join').onclick = async () => {
   const s = $('room-slug').value.trim();
   if (!s) return setStatus('room-status', 'Oda kodu gerekli', 'err');
   try {
-    await api('POST', `/api/rooms/${s}/join`);
-    const { room } = await api('GET', `/api/rooms/${s}`);
-    await connect(s, room.name);
+    await enterRoom(s);
   } catch (e) { setStatus('room-status', e.message, 'err'); }
 };
 
@@ -351,6 +356,7 @@ $('btn-leave').onclick = () => {
   $('video-strip').classList.add('is-hidden');
   slug = ''; state = null; seenVersion = 0;
   showScreen('home');
+  void refreshRooms();
 };
 
 // ═══════════════════════════════════════════════════════════ WebSocket
@@ -877,6 +883,40 @@ async function refreshVideos() {
     }
   } catch { /* oturum yoksa sessiz geç */ }
 }
+
+// ═══════════════════════════════════════════════════════════════ Odaların
+const SOURCE_LABEL = { youtube: 'YouTube', hls: 'Video' };
+
+function shortDate(iso) {
+  const d = new Date(iso);
+  return Number.isNaN(+d) ? '' : d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+}
+
+async function refreshRooms() {
+  try {
+    const { rooms } = await api('GET', '/api/rooms');
+    $('rooms-list').innerHTML = rooms.length === 0
+      ? '<li class="empty">Henüz odan yok — yukarıdan bir tane aç</li>'
+      : rooms.map((r) => `
+          <li class="room-card" data-enter="${escapeHtml(r.slug)}">
+            <strong>${escapeHtml(r.name)}</strong>
+            <span class="mono muted">${escapeHtml(r.slug)}</span>
+            <div class="room-meta">
+              <span class="chip">${SOURCE_LABEL[r.sourceType] ?? r.sourceType}</span>
+              <span class="muted small">${shortDate(r.createdAt)}</span>
+            </div>
+          </li>`).join('');
+
+    for (const li of $('rooms-list').querySelectorAll('[data-enter]')) {
+      li.onclick = async () => {
+        try { await enterRoom(li.getAttribute('data-enter')); }
+        catch (e) { setStatus('room-status', e.message, 'err'); }
+      };
+    }
+  } catch { /* oturum yoksa sessiz geç */ }
+}
+
+$('btn-rooms-refresh').onclick = () => void refreshRooms();
 
 async function useVideoInRoom(videoId) {
   if (!slug) return setStatus('upload-status', 'Önce bir odaya gir', 'err');

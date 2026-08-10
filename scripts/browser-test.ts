@@ -220,7 +220,12 @@ try {
     const rtt = parseMs(await readCell(pageA, 't-rtt'));
     assert(Number.isFinite(offset), 'offset okunamadı');
     assert(Number.isFinite(rtt) && rtt >= 0, `RTT geçersiz: ${rtt}`);
-    assert(Math.abs(offset) < 500, `offset beklenenden büyük: ${offset}ms`);
+    // Offset'in mutlak büyüklüğüne dar bir sınır koymak ortamı test etmek olur:
+    // Docker Desktop'ın VM saati host'tan saniyelerce kayabiliyor ve bu mekanizma
+    // tam da onu ölçmek için var. Buradaki sınır yalnızca saçma değeri yakalar;
+    // senkronun doğruluğu iki sekmenin offset'i ve hedef pozisyonu ile ölçülüyor.
+    assert(Math.abs(offset) < 30_000, `offset saçma: ${offset}ms`);
+    assert(rtt < 5_000, `RTT saçma: ${rtt}ms`);
     return `offset ${offset}ms · rtt ${rtt}ms`;
   });
 
@@ -253,6 +258,20 @@ try {
     );
     assert(firstIsHost, 'host listenin başında değil');
     return '2 üye, tek host';
+  });
+
+  // İki sekme aynı makinede, aynı sunucuyla konuşuyor: mutlak kayma ne olursa
+  // olsun ölçtükleri offset birbirini tutmalı. Ortamdan bağımsız asıl ölçüt bu.
+  await check('İki sekmenin ölçtüğü saat farkı birbirini tutuyor', async () => {
+    await pageB.waitForFunction(
+      () => !document.querySelector('#t-offset')?.textContent?.includes('—'),
+      { timeout: 15_000, polling: 250 },
+    );
+    const a = parseMs(await readCell(pageA, 't-offset'));
+    const b = parseMs(await readCell(pageB, 't-offset'));
+    const delta = Math.abs(a - b);
+    assert(delta < 250, `sekmeler farklı offset ölçtü: A=${a}ms B=${b}ms Δ=${delta}ms`);
+    return `A=${a}ms B=${b}ms Δ=${delta.toFixed(1)}ms`;
   });
 
   // -------------------------------------------------------------- Oynatıcı
@@ -510,6 +529,23 @@ try {
     );
     assert(isHost, 'B host olmadı');
     return 'B → host';
+  });
+
+  await check('Odadan çıkınca oda ana ekranda listeleniyor', async () => {
+    await click(pageB, '#btn-leave');
+    await pageB.waitForFunction(
+      (s: string) => Array.from(document.querySelectorAll('#rooms-list [data-enter]'))
+        .some((li) => li.getAttribute('data-enter') === s),
+      { timeout: 10_000, polling: 250 },
+      slug,
+    );
+    // Karttan tıklayarak geri girilebiliyor mu?
+    await click(pageB, `#rooms-list [data-enter="${slug}"]`);
+    await pageB.waitForFunction(
+      () => document.querySelector('#conn-state')?.textContent?.startsWith('bağlı') === true,
+      { timeout: 15_000, polling: 250 },
+    );
+    return 'listelendi ve karttan girildi';
   });
 
   await check('Sayfada JavaScript hatası yok', async () => {

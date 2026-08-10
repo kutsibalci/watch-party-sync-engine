@@ -5,7 +5,7 @@
 [![CI](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/Node-24-3c873a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Test](https://img.shields.io/badge/tests-77%20scenarios-3ecf8e)
+![Test](https://img.shields.io/badge/tests-79%20scenarios-3ecf8e)
 
 A real-time synchronisation engine for watching video together: YouTube, your own
 uploads or a shared screen — plus voice and video chat, a transcoding pipeline and
@@ -19,7 +19,7 @@ and on YouTube. That is a deliberate scope decision; the reasoning is
 > stateful real-time systems, asynchronous job processing and horizontal scaling
 > **with measured results**.
 
-**Status:** phases 0–4 complete · **77 automated tests** (including a real Chrome test) ·
+**Status:** phases 0–4 complete · **79 automated tests** (including a real Chrome test) ·
 type-check clean · production image runs as a non-root user
 
 <p align="center">
@@ -211,10 +211,10 @@ npm run smoke           # 13 · health, auth, error paths, security behaviour
 npm run sync-test       # 21 · sync engine, clock, versioning, tickets, host handover
 npm run pipeline-test   # 14 · queue mechanics + a real ffmpeg transcode
 npm run scale-test      # 12 · consistency across two instances
-npm run browser-test    # 15 · real Chrome, two tabs (watch it with HEADLESS=0)
+npm run browser-test    # 19 · real Chrome, two tabs (watch it with HEADLESS=0)
 ```
 
-**75 scenarios** in total, all of them running in CI as well.
+**79 scenarios** in total, all of them running in CI as well.
 
 The tests check more than "does it work" — they check **security behaviour**: whether
 the password hash leaks, whether the user-enumeration messages are identical, whether
