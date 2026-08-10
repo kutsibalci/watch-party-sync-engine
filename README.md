@@ -5,7 +5,7 @@
 [![CI](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/Node-24-3c873a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Test](https://img.shields.io/badge/tests-84%20scenarios-3ecf8e)
+![Test](https://img.shields.io/badge/tests-86%20scenarios-3ecf8e)
 
 A real-time synchronisation engine for watching video together: YouTube, your own
 uploads, a shared screen, or a browser that runs on the server and everyone drives
@@ -20,7 +20,7 @@ and on YouTube. That is a deliberate scope decision; the reasoning is
 > stateful real-time systems, asynchronous job processing and horizontal scaling
 > **with measured results**.
 
-**Status:** phases 0–6 complete · **84 automated tests** (including a real Chrome test) ·
+**Status:** phases 0–6 complete · **86 automated tests** (including a real Chrome test) ·
 type-check clean · production image runs as a non-root user
 
 <p align="center">
@@ -212,10 +212,10 @@ npm run smoke           # 13 · health, auth, error paths, security behaviour
 npm run sync-test       # 25 · sync engine, clock, versioning, tickets, host handover
 npm run pipeline-test   # 14 · queue mechanics + a real ffmpeg transcode
 npm run scale-test      # 12 · consistency across two instances
-npm run browser-test    # 20 · real Chrome, two tabs (watch it with HEADLESS=0)
+npm run browser-test    # 22 · real Chrome, two tabs (watch it with HEADLESS=0)
 ```
 
-**84 scenarios** in total, all of them running in CI as well.
+**86 scenarios** in total, all of them running in CI as well.
 
 The tests check more than "does it work" — they check **security behaviour**: whether
 the password hash leaks, whether the user-enumeration messages are identical, whether
@@ -516,6 +516,12 @@ scripts/   migration tool + four test suites
   capped at 6 participants; beyond that an SFU is needed.
 - The shared browser has **no audio**: CDP screencast gives video only. For watching
   something together with sound, the YouTube mode exists and runs on the sync engine.
+- Only the **room creator** drives the shared browser; everyone else watches. There is
+  a single tab on the server — if two people click at once, both lose. The check is
+  server-side; hiding the button in the client would not be enough.
+- **Google search does not load**: it sends server-side browsers to its bot check
+  (`google.com/sorry`). Searches typed in the address bar therefore go to DuckDuckGo;
+  Bing, Wikipedia and YouTube search all work.
 - The shared browser **does not scale horizontally**: a room's tab lives in one
   specific process, so multiple replicas would need sticky routing by slug. One
   Chromium tab per room is also a real cost line — the one that killed Rabb.it — so

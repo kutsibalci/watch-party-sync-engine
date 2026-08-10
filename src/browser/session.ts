@@ -76,6 +76,9 @@ async function sharedBrowser(): Promise<Browser> {
         '--disable-dev-shm-usage',
         // Sunucudaki tarayıcının kullanıcının cihazlarına erişimi yok; istemesin.
         '--use-fake-device-for-media-stream',
+        // Otomasyon bayrağı açıkken birçok site bozuk/kısıtlı sayfa döndürüyor.
+        // Burada gerçek bir kullanıcı geziniyor; sayfa normal render edilsin.
+        '--disable-blink-features=AutomationControlled',
         `--window-size=${VIEWPORT.width},${VIEWPORT.height}`,
       ],
     });
@@ -155,6 +158,13 @@ export class BrowserSession {
     const page = await browser.newPage();
     await page.setViewport(VIEWPORT);
 
+    // Varsayılan UA "HeadlessChrome" içeriyor ve bazı siteler buna sadeleşmiş
+    // ya da hiç sayfa döndürmüyor. Sürüm numarası kurulu Chromium'un kendisi.
+    await page.setUserAgent((await browser.version()).replace('HeadlessChrome', 'Chrome')
+      .replace(/^/, 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) ')
+      .concat(' Safari/537.36'));
+    await page.setExtraHTTPHeaders({ 'Accept-Language': 'tr-TR,tr;q=0.9,en;q=0.8' });
+
     const cdp = await page.createCDPSession();
     cdp.on('Page.screencastFrame', (evt: { data: string; sessionId: number }) => {
       // Ack ŞART: göndermezsek Chrome yeni kare üretmeyi durdurur.
@@ -184,12 +194,26 @@ export class BrowserSession {
 
   async navigate(rawUrl: string): Promise<void> {
     if (!this.page) return;
-    const url = normalizeUrl(rawUrl);
-    if (!url) return;
+    const url = toTargetUrl(rawUrl);
+    if (!url) {
+      this.broadcast({ type: 'BROWSER_ERROR', message: `Geçersiz adres: ${rawUrl}` });
+      return;
+    }
+
+    const previous = this.currentUrl;
     this.currentUrl = url;
-    // Yükleme uzun sürebilir; beklemiyoruz, kareler zaten akıyor.
-    await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-      .catch((err) => log.warn({ slug: this.slug, url, err: err.message }, 'Sayfa açılamadı'));
+
+    try {
+      await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    } catch (err) {
+      // Sessizce başarısız olmak en kötüsüydü: adres çubuğu değişiyor, ekranda
+      // eski sayfa duruyor ve kimse neden olmadığını bilmiyordu.
+      const message = explainNavError((err as Error).message, url);
+      log.warn({ slug: this.slug, url, err: (err as Error).message }, 'Sayfa açılamadı');
+      this.currentUrl = previous;
+      this.broadcast({ type: 'BROWSER_ERROR', message });
+      this.broadcast({ type: 'BROWSER_URL', url: previous });
+    }
   }
 
   async mouse(evt: {
@@ -260,6 +284,27 @@ function clamp(v: number, max: number): number {
   return Math.max(0, Math.min(max, Math.round(v)));
 }
 
+/** Chrome'un ağ hatalarını kullanıcının anlayacağı cümleye çevirir. */
+function explainNavError(raw: string, url: string): string {
+  const host = (() => { try { return new URL(url).host; } catch { return url; } })();
+  if (raw.includes('ERR_NAME_NOT_RESOLVED')) {
+    return `${host} çözümlenemedi — sunucunun DNS ayarlarını kontrol edin`;
+  }
+  if (raw.includes('ERR_INTERNET_DISCONNECTED') || raw.includes('ERR_NETWORK_CHANGED')) {
+    return 'Sunucunun internet bağlantısı yok';
+  }
+  if (raw.includes('ERR_CONNECTION_REFUSED') || raw.includes('ERR_CONNECTION_TIMED_OUT')) {
+    return `${host} bağlantıyı kabul etmedi`;
+  }
+  if (raw.includes('ERR_CERT') || raw.includes('SSL')) {
+    return `${host} sertifikası doğrulanamadı`;
+  }
+  if (raw.toLowerCase().includes('timeout')) {
+    return `${host} 30 saniyede yüklenmedi`;
+  }
+  return `${host} açılamadı`;
+}
+
 /**
  * Adresi güvenli hâle getirir.
  *
@@ -267,6 +312,28 @@ function clamp(v: number, max: number): number {
  * açılan kapıdır — sunucuda çalışan bir tarayıcıda bunlara izin vermek dosya
  * okutmak demektir.
  */
+/**
+ * Adres çubuğu aynı zamanda arama kutusu.
+ *
+ * Arama motoru DuckDuckGo, çünkü Google sunucuda çalışan tarayıcıları
+ * `google.com/sorry` bot kontrolüne yolluyor — ölçtük. DuckDuckGo, Bing,
+ * Wikipedia ve YouTube araması sorunsuz açılıyor.
+ */
+const SEARCH_URL = 'https://duckduckgo.com/?q=';
+
+/** Nokta içeren, boşluksuz bir şey adres sayılır; gerisi arama. */
+function looksLikeAddress(s: string): boolean {
+  if (/^https?:\/\//i.test(s)) return true;
+  return /^[^\s/]+\.[^\s/]{2,}(\/\S*)?$/.test(s);
+}
+
+export function toTargetUrl(raw: string): string | null {
+  const s = raw.trim();
+  if (!s) return null;
+  if (looksLikeAddress(s)) return normalizeUrl(s);
+  return SEARCH_URL + encodeURIComponent(s);
+}
+
 export function normalizeUrl(raw: string): string | null {
   const s = raw.trim();
   if (!s) return null;

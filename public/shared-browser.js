@@ -22,9 +22,16 @@ export function createSharedBrowser({ canvas, wsBase, getTicket, onState, onUrl,
   let ws = null;
   let pending = null;   // çizilmeyi bekleyen son kare
   let drawing = false;
+  /** Sayfayı yalnızca oda kurucusu sürer; diğerleri izler. */
+  let canDrive = false;
 
   function send(msg) {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  }
+
+  /** Girdi olayları yalnızca sürücüden gider. Yetki asıl sunucuda denetleniyor. */
+  function drive(msg) {
+    if (canDrive) send(msg);
   }
 
   /**
@@ -74,7 +81,7 @@ export function createSharedBrowser({ canvas, wsBase, getTicket, onState, onUrl,
       try { msg = JSON.parse(ev.data); } catch { return; }
       if (msg.type === 'BROWSER_STATE') onState?.(msg);
       else if (msg.type === 'BROWSER_URL') onUrl?.(msg.url);
-      else if (msg.type === 'BROWSER_ERROR') onError?.(msg.message);
+      else if (msg.type === 'BROWSER_ERROR' || msg.type === 'BROWSER_DENIED') onError?.(msg.message);
     };
 
     return new Promise((resolve) => {
@@ -109,37 +116,47 @@ export function createSharedBrowser({ canvas, wsBase, getTicket, onState, onUrl,
 
   const BUTTONS = ['left', 'middle', 'right'];
 
+  // Her fare hareketini yollamak saniyede yüzlerce mesaj eder; sunucudaki
+  // sekmeye bu kadar sık dokunmanın da faydası yok.
+  const MOVE_INTERVAL_MS = 40;
+  let lastMoveAt = 0;
+
   canvas.addEventListener('mousemove', (ev) => {
+    const now = performance.now();
+    if (now - lastMoveAt < MOVE_INTERVAL_MS) return;
+    lastMoveAt = now;
     const p = toPage(ev);
-    send({ type: 'BROWSER_MOUSE', kind: 'mouseMoved', x: p.x, y: p.y });
+    drive({ type: 'BROWSER_MOUSE', kind: 'mouseMoved', x: p.x, y: p.y });
   });
 
   canvas.addEventListener('mousedown', (ev) => {
     canvas.focus();
     const p = toPage(ev);
-    send({ type: 'BROWSER_MOUSE', kind: 'mousePressed', x: p.x, y: p.y, button: BUTTONS[ev.button] ?? 'left' });
+    drive({ type: 'BROWSER_MOUSE', kind: 'mousePressed', x: p.x, y: p.y, button: BUTTONS[ev.button] ?? 'left' });
   });
 
   canvas.addEventListener('mouseup', (ev) => {
     const p = toPage(ev);
-    send({ type: 'BROWSER_MOUSE', kind: 'mouseReleased', x: p.x, y: p.y, button: BUTTONS[ev.button] ?? 'left' });
+    drive({ type: 'BROWSER_MOUSE', kind: 'mouseReleased', x: p.x, y: p.y, button: BUTTONS[ev.button] ?? 'left' });
   });
 
   canvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
 
   canvas.addEventListener('wheel', (ev) => {
+    if (!canDrive) return;   // sürücü değilsek sayfanın kendi kaydırması kalsın
     ev.preventDefault();
     const p = toPage(ev);
-    send({ type: 'BROWSER_MOUSE', kind: 'mouseWheel', x: p.x, y: p.y, deltaX: ev.deltaX, deltaY: ev.deltaY });
+    drive({ type: 'BROWSER_MOUSE', kind: 'mouseWheel', x: p.x, y: p.y, deltaX: ev.deltaX, deltaY: ev.deltaY });
   }, { passive: false });
 
   // Tarayıcının kendi kısayollarını çalmayalım; yalnızca sayfaya ait tuşlar.
   const PASS_THROUGH = new Set(['F5', 'F11', 'F12']);
 
   canvas.addEventListener('keydown', (ev) => {
+    if (!canDrive) return;
     if (PASS_THROUGH.has(ev.key) || ev.ctrlKey && ['r', 'R', 't', 'w'].includes(ev.key)) return;
     ev.preventDefault();
-    send({
+    drive({
       type: 'BROWSER_KEY', kind: 'keyDown',
       key: ev.key, code: ev.code, keyCode: ev.keyCode,
       // Tek karakterlik tuşlarda metni de yollamak gerekiyor, yoksa harf yazılmaz.
@@ -148,9 +165,9 @@ export function createSharedBrowser({ canvas, wsBase, getTicket, onState, onUrl,
   });
 
   canvas.addEventListener('keyup', (ev) => {
-    if (PASS_THROUGH.has(ev.key)) return;
+    if (!canDrive || PASS_THROUGH.has(ev.key)) return;
     ev.preventDefault();
-    send({ type: 'BROWSER_KEY', kind: 'keyUp', key: ev.key, code: ev.code, keyCode: ev.keyCode });
+    drive({ type: 'BROWSER_KEY', kind: 'keyUp', key: ev.key, code: ev.code, keyCode: ev.keyCode });
   });
 
   return {
@@ -159,6 +176,11 @@ export function createSharedBrowser({ canvas, wsBase, getTicket, onState, onUrl,
     start: (url) => send({ type: 'BROWSER_START', url }),
     navigate: (url) => send({ type: 'BROWSER_NAV', url }),
     stop: () => send({ type: 'BROWSER_STOP' }),
+    setDriver(yes) {
+      canDrive = Boolean(yes);
+      canvas.classList.toggle('is-readonly', !canDrive);
+    },
+    get canDrive() { return canDrive; },
     get connected() { return ws?.readyState === WebSocket.OPEN; },
   };
 }

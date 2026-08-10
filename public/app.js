@@ -548,6 +548,9 @@ globalThis.__sync = () => {
     offsetMs: clockOffsetMs,
     version: state.version,
     isPlaying: state.isPlaying,
+    iAmHost,
+    selfConnectionId,
+    browserActive,
     // Ham örnekler: sunucu saatinin kararlı olup olmadığını buradan anlıyoruz.
     samples: clockSamples.map((s) => ({ o: s.offsetMs, t: s.atMs })),
   };
@@ -683,13 +686,35 @@ async function refreshLocalStream() {
   }
 }
 
+/**
+ * Medya değişiklikleri SIRAYLA işlenir.
+ *
+ * Mikrofon ve kameraya arka arkaya basmak iki getUserMedia çağrısını
+ * yarıştırıyordu; biri başarısız olunca ortak `media` bayraklarını sıfırlıyor
+ * ve diğerinin başarısını da götürüyordu. Testte "akış geçti ama rozet
+ * yansımadı" diye göründü.
+ */
+let mediaQueue = Promise.resolve();
+function queueMedia(fn) {
+  mediaQueue = mediaQueue.then(fn).catch((e) => addSystem(`Medya değiştirilemedi: ${e.message}`));
+  return mediaQueue;
+}
+
 // Önce akışı al, SONRA duyur. Ters sırada duyuru odaya "bende kamera var"
 // derken elimizde henüz akış olmuyor; dönen PRESENCE ile sync çalışıyor ama
 // kuracak bir şey bulamıyordu. CI'da tam olarak bu oldu.
-$('btn-mic').onclick = async () => { media.mic = !media.mic; await refreshLocalStream(); announceMedia(); };
-$('btn-cam').onclick = async () => { media.cam = !media.cam; await refreshLocalStream(); announceMedia(); };
+$('btn-mic').onclick = () => queueMedia(async () => {
+  media.mic = !media.mic;
+  await refreshLocalStream();
+  announceMedia();
+});
+$('btn-cam').onclick = () => queueMedia(async () => {
+  media.cam = !media.cam;
+  await refreshLocalStream();
+  announceMedia();
+});
 
-$('btn-screen').onclick = async () => {
+$('btn-screen').onclick = () => queueMedia(async () => {
   if (media.screen) {
     media.screen = false;
     $('screen-view').hidden = true;
@@ -714,7 +739,7 @@ $('btn-screen').onclick = async () => {
   } catch (e) {
     if (e.name !== 'NotAllowedError') addSystem(`Ekran paylaşılamadı: ${e.message}`);
   }
-};
+});
 
 function showScreenStage(stream) {
   $('stage-empty').classList.add('is-hidden');
@@ -795,6 +820,8 @@ function routeScreenShare(members) {
 
 // ═══════════════════════════════════════════════════════ Ortak tarayıcı
 let browserActive = false;
+/** Oda kurucusu muyuz? Ortak tarayıcıyı ve kaynağı yalnızca o sürer. */
+let iAmHost = false;
 /** Oda girişinde açılan ortak tarayıcı soketinin sonucu. */
 let bwReady = Promise.resolve(false);
 
@@ -823,12 +850,28 @@ const sharedBrowser = createSharedBrowser({
 });
 
 // Bağlantı çubuğu iki işe birden bakıyor; hangisinde olduğumuz belli olsun.
+// Kaynağı ve ortak tarayıcıyı yalnızca kurucu sürebildiği için, sürücü
+// değilsek bunu yazıyoruz — tıklayıp hiçbir şey olmamasından iyidir.
 function updateLinkbar() {
-  $('stage-url').placeholder = browserActive
-    ? 'Adres yaz ve Enter\'a bas'
-    : 'YouTube bağlantısını buraya yapıştır ve Enter\'a bas';
+  const bar = $('stage-url');
+  if (!iAmHost) {
+    bar.placeholder = 'Kaynağı yalnızca oda kurucusu değiştirebilir';
+    bar.disabled = true;
+    $('btn-stage-url').disabled = true;
+    $('btn-browser').disabled = true;
+  } else {
+    bar.disabled = false;
+    $('btn-stage-url').disabled = false;
+    $('btn-browser').disabled = false;
+    bar.placeholder = browserActive
+      ? 'Adres ya da arama yaz, Enter\'a bas'
+      : 'YouTube bağlantısını buraya yapıştır ve Enter\'a bas';
+  }
   $('btn-stage-url').textContent = browserActive ? 'Git' : 'Oynat';
   $('linkbar-icon').textContent = browserActive ? '🌐' : '▶';
+  $('browser-hint').textContent = browserActive && !iAmHost
+    ? 'Ortak tarayıcıyı oda kurucusu sürüyor'
+    : '';
 }
 
 async function openSharedBrowser(url) {
@@ -859,6 +902,12 @@ function renderMembers(members) {
       ${m.isHost ? '<span class="host-tag">HOST</span>' : ''}
     </li>`;
   }).join('');
+
+  // Host değişebilir (kurucu çıkarsa sıradakine geçer); yetkiyi her
+  // PRESENCE'ta tazeliyoruz.
+  iAmHost = members.some((m) => m.isHost && m.connectionId === selfConnectionId);
+  sharedBrowser.setDriver(iAmHost);
+  updateLinkbar();
 
   const peers = members.filter((m) => m.connectionId !== selfConnectionId);
   syncPeers();

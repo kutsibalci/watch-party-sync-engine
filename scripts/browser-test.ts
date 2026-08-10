@@ -537,8 +537,15 @@ try {
       .catch(() => false);
 
     assert(arrived, 'B, A\'nın akışını almadı');
-    const badge = await pageB.$eval('#members', (el) => el.textContent ?? '');
-    assert(badge.includes('🎙'), 'mikrofon rozeti karşı tarafa yansımadı');
+
+    // Rozeti ANINDA iddia etmek yanlıştı: akış artık duyurudan ÖNCE varabiliyor
+    // (bağlantı, yerel akış hazır olur olmaz kuruluyor; RTC_MEDIA hemen ardından
+    // gidiyor). İki ayrı yol, iki ayrı varış anı — bekleyip öyle bakıyoruz.
+    const badged = await pageB.waitForFunction(
+      () => (document.getElementById('members')?.textContent ?? '').includes('🎙'),
+      { timeout: 10_000, polling: 250 },
+    ).then(() => true).catch(() => false);
+    assert(badged, 'mikrofon rozeti karşı tarafa yansımadı');
     return 'akış ve rozet karşı tarafta';
   });
 
@@ -561,6 +568,94 @@ try {
     return 'yayın B\'de açıldı';
   });
 
+  // Ortak tarayıcı ayrı ve İSTEĞE BAĞLI bir servis; çalışmıyorsa oda normal
+  // çalışmaya devam eder, o yüzden testler atlanır, kırılmaz.
+  const browserSvc = await fetch('http://127.0.0.1:8094/healthz')
+    .then((r) => r.ok)
+    .catch(() => false);
+
+  const canvasPainted = (page: Page) => page.waitForFunction(
+    () => {
+      const c = document.getElementById('browser-view') as HTMLCanvasElement | null;
+      if (!c || c.hidden) return false;
+      // "hidden değil" tek başına bir şey ispatlamaz; piksellere bakıyoruz.
+      const d = c.getContext('2d')?.getImageData(0, 0, c.width, c.height).data;
+      if (!d) return false;
+      for (let i = 0; i < d.length; i += 4 * 997) {
+        if (d[i] !== 0 || d[i + 1] !== 0 || d[i + 2] !== 0) return true;
+      }
+      return false;
+    },
+    { timeout: 25_000, polling: 500 },
+  ).then(() => true).catch(() => false);
+
+  if (!browserSvc) {
+    skip('Ortak tarayıcı iki sekmede de çiziliyor', 'servis çalışmıyor (npm run dev:browser)');
+    skip('Ortak tarayıcıyı yalnızca oda kurucusu sürüyor', 'servis çalışmıyor');
+    skip('Adres çubuğuna yazılan arama sonuç sayfasını açıyor', 'servis çalışmıyor');
+  } else {
+    await check('Ortak tarayıcı iki sekmede de çiziliyor', async () => {
+      await click(pageA, '#btn-browser');            // A host
+      // Servis reddederse (kapasite, DNS) sebebi sohbet kutusuna düşüyor;
+      // "canvas boş kaldı" tek başına teşhis ettirmiyordu.
+      const neden = async (p: Page) =>
+        (await p.$eval('#chat-log', (el) => el.textContent ?? '')).trim().slice(-160);
+      assert(await canvasPainted(pageA), `A: canvas boş kaldı · ${await neden(pageA)}`);
+      assert(await canvasPainted(pageB), `B: kare gelmedi · ${await neden(pageB)}`);
+      return 'sunucu sekmesi iki tarafta da çizildi';
+    });
+
+    await check('Ortak tarayıcıyı yalnızca oda kurucusu sürüyor', async () => {
+      // Arayüz tarafı: host olmayanda adres çubuğu ve düğme kilitli.
+      const locked = await pageB.evaluate(() => ({
+        url: (document.getElementById('stage-url') as HTMLInputElement).disabled,
+        go: (document.getElementById('btn-stage-url') as HTMLButtonElement).disabled,
+        canvas: document.getElementById('browser-view')?.classList.contains('is-readonly'),
+        sync: (globalThis as any).__sync?.(),
+        uye: document.getElementById('members')?.textContent?.trim().slice(0, 80),
+      }));
+      assert(locked.url && locked.go, `B'de kontroller açık kalmış: ${JSON.stringify(locked)}`);
+      assert(locked.canvas, 'B\'de canvas salt-okunur işaretlenmemiş');
+
+      // Sunucu tarafı asıl kapı: kilidi zorla açıp deneyince reddedilmeli.
+      const before = await pageB.$eval('#stage-url', (el) => (el as HTMLInputElement).value);
+      await pageB.evaluate(() => {
+        const i = document.getElementById('stage-url') as HTMLInputElement;
+        const b = document.getElementById('btn-stage-url') as HTMLButtonElement;
+        i.disabled = false; b.disabled = false;
+        i.value = 'https://example.com';
+      });
+      await click(pageB, '#btn-stage-url');
+
+      const denied = await pageB.waitForFunction(
+        () => /yalnızca oda kurucusu/i.test(document.getElementById('chat-log')?.textContent ?? ''),
+        { timeout: 8000, polling: 250 },
+      ).then(() => true).catch(() => false);
+      assert(denied, 'host olmayanın komutu reddedilmedi');
+
+      const after = await pageA.$eval('#stage-url', (el) => (el as HTMLInputElement).value);
+      assert(!after.includes('example.com'), `sayfa yine de değişti: ${after}`);
+      void before;
+      return 'arayüz kilitli, sunucu da reddediyor';
+    });
+
+    await check('Adres çubuğuna yazılan arama sonuç sayfasını açıyor', async () => {
+      await pageA.$eval('#stage-url', (el) => {
+        (el as HTMLInputElement).value = 'birlikte izleme';
+      });
+      await click(pageA, '#btn-stage-url');
+      // Google sunucu tarayıcılarını engellediği için arama DuckDuckGo'ya gider.
+      const searched = await pageA.waitForFunction(
+        () => /duckduckgo\.com/.test(
+          (document.getElementById('stage-url') as HTMLInputElement).value),
+        { timeout: 25_000, polling: 500 },
+      ).then(() => true).catch(() => false);
+      assert(searched, 'arama sonuç sayfasına gidilmedi');
+      await click(pageA, '#btn-browser');   // ortak tarayıcıyı kapat
+      return 'arama açıldı';
+    });
+  }
+
   await check('A kapanınca B host oluyor (leader election)', async () => {
     await pageA.close();
     await pageB.waitForFunction(
@@ -574,45 +669,6 @@ try {
     assert(isHost, 'B host olmadı');
     return 'B → host';
   });
-
-  // Ortak tarayıcı ayrı ve İSTEĞE BAĞLI bir servis; çalışmıyorsa oda normal
-  // çalışmaya devam eder, o yüzden test de atlanır, kırılmaz.
-  const browserSvc = await fetch('http://127.0.0.1:8094/healthz')
-    .then((r) => r.ok)
-    .catch(() => false);
-
-  if (!browserSvc) {
-    skip('Ortak tarayıcı sahnede açılıyor', 'servis çalışmıyor (npm run dev:browser)');
-  } else {
-    await check('Ortak tarayıcı sahnede açılıyor ve kare çiziliyor', async () => {
-      await click(pageB, '#btn-browser');
-      await pageB.waitForFunction(
-        () => document.getElementById('browser-view')?.hidden === false,
-        { timeout: 25_000, polling: 250 },
-      );
-
-      // Canvas boş mu, gerçekten bir şey çizildi mi? Piksellere bakıyoruz:
-      // "hidden değil" tek başına bir şey ispatlamıyor.
-      const painted = await pageB.waitForFunction(
-        () => {
-          const c = document.getElementById('browser-view') as HTMLCanvasElement | null;
-          if (!c) return false;
-          const ctx = c.getContext('2d');
-          const d = ctx?.getImageData(0, 0, c.width, c.height).data;
-          if (!d) return false;
-          for (let i = 0; i < d.length; i += 4 * 997) {
-            if (d[i] !== 0 || d[i + 1] !== 0 || d[i + 2] !== 0) return true;
-          }
-          return false;
-        },
-        { timeout: 25_000, polling: 500 },
-      ).then(() => true).catch(() => false);
-
-      assert(painted, 'canvas boş kaldı — kare gelmedi');
-      await click(pageB, '#btn-browser');   // kapat
-      return 'sunucu tarayıcısı çizildi';
-    });
-  }
 
   await check('Odadan çıkınca oda ana ekranda listeleniyor', async () => {
     await click(pageB, '#btn-leave');

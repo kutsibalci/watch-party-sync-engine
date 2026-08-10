@@ -216,6 +216,12 @@ services:
       LOG_LEVEL: debug
     ports:
       - "8094:8094"
+    # Bu konteynerin tek işi genel siteleri açmak. Docker Desktop'ın iç
+    # çözümleyicisi bu makinede aralıklı olarak düşüyordu ve sonuç
+    # ERR_NAME_NOT_RESOLVED oluyordu; adresi doğrudan veriyoruz.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     volumes:
       - ./src:/app/src:ro
     # Chromium /dev/shm kullanır; varsayılan 64 MB sekmeyi çökertir.

@@ -20,6 +20,7 @@ import { createLogger } from '../shared/logger.ts';
 import { consumeTicket } from '../shared/ticket.ts';
 import { pingRedis, closeRedis } from '../shared/redis.ts';
 import { BrowserClientMessageSchema } from '../shared/protocol.ts';
+import { cachedHost } from '../shared/presence.ts';
 import { sessionFor, sessions, shutdownBrowser, type BrowserSession } from './session.ts';
 
 const logger: FastifyBaseLogger = createLogger('browser-svc');
@@ -86,7 +87,7 @@ async function handleConnection(socket: WebSocket, req: FastifyRequest): Promise
     socket.close(1008, 'Bilet geçersiz ya da süresi dolmuş');
     return;
   }
-  const { slug, displayName } = payload;
+  const { slug, displayName, userId } = payload;
 
   let session: BrowserSession;
   try {
@@ -122,6 +123,27 @@ async function handleConnection(socket: WebSocket, req: FastifyRequest): Promise
     const result = BrowserClientMessageSchema.safeParse(parsed);
     if (!result.success) return;
     const msg = result.data;
+
+    // Sayfayı yalnızca ODA KURUCUSU sürer; diğerleri izler.
+    //
+    // Sunucuda tek bir sekme var: iki kişi aynı anda tıklarsa ikisi de kaybeder.
+    // Yetki kontrolü SUNUCUDA — istemcide düğmeyi gizlemek yeterli değil,
+    // soket herkese açık.
+    //
+    // Host = odanın en eski canlı üyesi; realtime servisiyle aynı kural,
+    // aynı yerden okunuyor. Kurucu çıkarsa kontrol sıradakine geçer.
+    const host = await cachedHost(slug);
+    if (host && host.userId !== userId) {
+      // Fare/klavye sessizce yutulur: reddi her harekette geri yollamak
+      // saniyede onlarca mesaj eder. Anlamlı eylemde bir kez haber veriyoruz.
+      if (msg.type !== 'BROWSER_MOUSE' && msg.type !== 'BROWSER_KEY') {
+        send(socket, {
+          type: 'BROWSER_DENIED',
+          message: 'Ortak tarayıcıyı yalnızca oda kurucusu kullanabilir',
+        });
+      }
+      return;
+    }
 
     switch (msg.type) {
       case 'BROWSER_START':

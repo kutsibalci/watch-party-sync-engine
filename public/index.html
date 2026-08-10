@@ -204,15 +204,18 @@
     <div id="source-browser" class="source-pane is-hidden">
       <label class="field">
         <span>Açılacak adres</span>
-        <input id="bw-url" type="text" value="https://www.wikipedia.org" spellcheck="false" />
+        <input id="bw-url" type="text" value="https://www.wikipedia.org" spellcheck="false"
+               placeholder="Adres ya da arama" />
       </label>
       <p class="muted small">
         Tarayıcı senin bilgisayarında değil <strong>sunucuda</strong> açılır; odadaki
-        herkes aynı sekmeyi görür ve tıklayabilir.
+        herkes aynı sekmeyi görür. Sayfayı <strong>oda kurucusu</strong> sürer,
+        diğerleri izler. Adres çubuğuna arama da yazabilirsin.
       </p>
       <p class="note">
         Bu modda <strong>ses yok</strong> ve senkron motoru devrede değil. Sesli
-        birlikte izlemek için YouTube modunu kullan.
+        birlikte izlemek için YouTube modunu kullan. Google sunucu tarayıcılarını
+        engellediği için aramalar DuckDuckGo'ya gider.
       </p>
     </div>
 
@@ -246,6 +249,7 @@
         <button id="btn-stage-url" class="btn btn-primary btn-sm">Oynat</button>
         <button id="btn-source" class="btn btn-quiet btn-sm">Diğer kaynaklar</button>
       </div>
+      <p id="browser-hint" class="muted small linkbar-hint"></p>
 
       <div class="stage">
         <div id="player"></div>

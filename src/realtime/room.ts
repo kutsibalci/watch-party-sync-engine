@@ -8,6 +8,7 @@ import { wsActiveRooms, wsBroadcastLatency } from '../shared/metrics.ts';
 import type { MediaFlags, Member, PlaybackState, ServerMessage, SourceRef } from '../shared/protocol.ts';
 import { NO_MEDIA } from '../shared/protocol.ts';
 import { userChannel, type UserEvent } from '../shared/media.ts';
+import { currentHost, MEMBER_STALE_MS as PRESENCE_STALE_MS } from '../shared/presence.ts';
 
 const log = createLogger('room');
 
@@ -41,8 +42,8 @@ const log = createLogger('room');
  */
 
 const STATE_TTL_SEC = 24 * 3600;
-/** Bu süre boyunca kalp atışı gelmeyen üye ölü sayılır. */
-export const MEMBER_STALE_MS = 45_000;
+/** Bu süre boyunca kalp atışı gelmeyen üye ölü sayılır (shared/presence.ts). */
+export const MEMBER_STALE_MS = PRESENCE_STALE_MS;
 /** Kendi bağlantılarımızın kalp atışını bu sıklıkta yeniliyoruz. */
 export const HEARTBEAT_INTERVAL_MS = 15_000;
 /**
@@ -631,31 +632,13 @@ class RoomHub {
     }));
   }
 
+  /**
+   * Host kuralı shared/presence.ts'te. Ortak tarayıcı servisi de aynı yerden
+   * okuyor — iki kopya tutmak, iki servisin farklı kişiyi host sanmasıyla biter.
+   */
   async isHost(slug: string, connectionId: string): Promise<boolean> {
-    const cutoff = Date.now() - MEMBER_STALE_MS;
-    const [liveIds, all] = await Promise.all([
-      redis.zrangebyscore(K.hb(slug), cutoff, '+inf'),
-      redis.hgetall(K.members(slug)),
-    ]);
-    const live = new Set(liveIds);
-
-    let bestId: string | null = null;
-    let bestJoined = Number.POSITIVE_INFINITY;
-
-    for (const [id, raw] of Object.entries(all)) {
-      if (!live.has(id)) continue;
-      let joinedAtMs: number;
-      try {
-        joinedAtMs = (JSON.parse(raw) as MemberEntry).joinedAtMs;
-      } catch {
-        continue;
-      }
-      if (joinedAtMs < bestJoined || (joinedAtMs === bestJoined && bestId !== null && id < bestId)) {
-        bestJoined = joinedAtMs;
-        bestId = id;
-      }
-    }
-    return bestId === connectionId;
+    const host = await currentHost(slug);
+    return host?.connectionId === connectionId;
   }
 
   /** Kendi bağlantılarımızın "hâlâ buradayım" kaydını tazeler. */
