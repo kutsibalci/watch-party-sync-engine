@@ -1,0 +1,27 @@
+# Ortak tarayıcı servisi — geliştirme imajı.
+#
+# Neden ayrı imaj: Chromium tek başına ~400 MB. Diğer üç servis (api, realtime,
+# worker) aynı kod tabanını çalıştırdığı için tek imajı paylaşıyor, ama hiçbiri
+# tarayıcıya ihtiyaç duymuyor. Chromium'u ortak imaja koymak üçünü de şişirirdi.
+FROM node:24-alpine
+
+# Puppeteer'ın kendi Chromium'unu indirmesi Alpine'da çalışmaz (glibc yok);
+# dağıtımın kendi paketini kullanıyoruz. Fontlar olmadan sayfalar boş kutu çizer.
+RUN apk add --no-cache \
+      chromium nss freetype harfbuzz ca-certificates \
+      ttf-freefont font-noto font-noto-emoji \
+      tini
+
+# puppeteer-core zaten indirme yapmaz; yine de niyeti açık bırakalım.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm install
+
+COPY tsconfig*.json ./
+COPY src ./src
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["npm", "run", "dev:browser"]

@@ -5,14 +5,19 @@ import {
   bestSample,
   decideDriftAction,
   MAX_MEDIA_PEERS,
+  CLOCK_SAMPLE_MAX_AGE_MS,
 } from '/app/protocol.js';
 import { createMesh } from '/app/rtc.js';
+import { createSharedBrowser } from '/app/shared-browser.js';
 
 const API = location.origin;
 // Geliştirmede iki realtime instance ayrı portlarda. ?rt=8092 ile ikincisine
 // bağlanmak, oda durumunun süreçler arası paylaşıldığını göstermeyi sağlıyor.
 const RT_PORT = new URLSearchParams(location.search).get('rt') || '8091';
-const WS_BASE = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:${RT_PORT}/ws`;
+const WS_SCHEME = location.protocol === 'https:' ? 'wss' : 'ws';
+const WS_BASE = `${WS_SCHEME}://${location.hostname}:${RT_PORT}/ws`;
+const BW_PORT = new URLSearchParams(location.search).get('bw') || '8094';
+const BW_BASE = `${WS_SCHEME}://${location.hostname}:${BW_PORT}/browser`;
 
 // esbuild IIFE paketinde sınıf .default altına düşer; CDN UMD'sinde doğrudan gelir.
 const HlsLib = globalThis.Hls?.isSupported ? globalThis.Hls : globalThis.Hls?.default;
@@ -276,6 +281,24 @@ for (const opt of document.querySelectorAll('[data-source]')) {
   };
 }
 
+// Sahnenin üstündeki bağlantı çubuğu: kaynak sayfasını açmadan YouTube geçir.
+function playPastedLink() {
+  const raw = $('stage-url').value.trim();
+  if (!raw) return;
+  if (!slug) return toast('Önce bir odaya gir');
+
+  // Ortak tarayıcı açıkken aynı kutu adres çubuğu gibi davranır.
+  if (browserActive) { sharedBrowser.navigate(raw); return; }
+
+  const ytId = parseYouTubeId(raw);
+  if (!ytId) return toast('Bu bir YouTube bağlantısı değil — başka bir site için "Ortak tarayıcı"');
+  sendMsg({ type: 'SET_SOURCE', source: { type: 'youtube', videoId: ytId } });
+  $('stage-url').value = '';
+}
+
+$('btn-stage-url').onclick = playPastedLink;
+$('stage-url').onkeydown = (e) => { if (e.key === 'Enter') playPastedLink(); };
+
 $('btn-source-close').onclick = () => $('source-sheet').classList.add('is-hidden');
 $('btn-create').onclick = () => openSourceSheet('create');
 $('btn-source').onclick = () => openSourceSheet('change');
@@ -314,6 +337,7 @@ $('btn-source-go').onclick = async () => {
       await connect(room.slug, room.name);
       if (sourceMode === 'library' && pickedVideoId) await useVideoInRoom(pickedVideoId);
       if (sourceMode === 'screen') toast('Hazırsan "Ekran paylaş" düğmesine bas');
+      if (sourceMode === 'browser') await openSharedBrowser($('bw-url').value);
       return;
     }
 
@@ -325,6 +349,8 @@ $('btn-source-go').onclick = async () => {
     } else if (sourceMode === 'library') {
       if (!pickedVideoId) return setStatus('source-status', 'Bir video seç', 'err');
       await useVideoInRoom(pickedVideoId);
+    } else if (sourceMode === 'browser') {
+      await openSharedBrowser($('bw-url').value);
     } else {
       toast('"Ekran paylaş" düğmesiyle başlatabilirsin');
     }
@@ -354,6 +380,12 @@ $('btn-leave').onclick = () => {
   for (const k of ['mic', 'cam', 'screen']) $(`btn-${k}`).dataset.on = 'false';
   $('screen-view').hidden = true; $('screen-view').srcObject = null;
   $('video-strip').classList.add('is-hidden');
+  sharedBrowser.disconnect();
+  browserActive = false;
+  $('browser-view').hidden = true;
+  $('btn-browser').dataset.on = 'false';
+  $('screen-room').classList.remove('browser-mode');
+  updateLinkbar();
   slug = ''; state = null; seenVersion = 0;
   showScreen('home');
   void refreshRooms();
@@ -370,6 +402,10 @@ async function connect(roomSlug, name) {
   $('room-code').textContent = slug;
   $('chat-log').innerHTML = '';
   showScreen('room');
+
+  // Ortak tarayıcı isteğe bağlı bir servis; yoksa oda normal çalışmaya devam
+  // eder. Odaya girerken bağlanıyoruz ki biri açtığında herkes görsün.
+  bwReady = sharedBrowser.connect(roomSlug);
 
   if (ws) { ws.onclose = null; ws.close(); }
 
@@ -424,8 +460,9 @@ function handleMessage(msg) {
       break;
 
     case 'PONG': {
-      clockSamples.push(computeClockSample(msg.t0, msg.t1, msg.t2, Date.now()));
-      const best = bestSample(clockSamples);
+      const now = Date.now();
+      clockSamples.push(computeClockSample(msg.t0, msg.t1, msg.t2, now));
+      const best = bestSample(clockSamples, now);
       clockOffsetMs = best.offsetMs;
       $('t-offset').textContent = `${best.offsetMs.toFixed(1)} ms`;
       $('t-rtt').textContent = `${best.rttMs.toFixed(1)} ms`;
@@ -461,10 +498,12 @@ function syncClock(count) {
   }
 }
 setInterval(() => {
-  if (ws?.readyState === WebSocket.OPEN) {
-    if (clockSamples.length > 40) clockSamples = clockSamples.slice(-10);
-    syncClock(3);
-  }
+  if (ws?.readyState !== WebSocket.OPEN) return;
+  // Sayıya göre değil YAŞA göre buda: sayıya göre budamak, örnek akışı
+  // yavaşsa çok eski örnekleri elde tutuyordu.
+  const cutoff = Date.now() - CLOCK_SAMPLE_MAX_AGE_MS;
+  clockSamples = clockSamples.filter((s) => s.atMs >= cutoff).slice(-40);
+  syncClock(3);
 }, 30000);
 
 // ═══════════════════════════════════════════════════════════ Kontroller
@@ -489,6 +528,28 @@ function sendChat() {
 
 // ════════════════════════════════════════════════════ Senkron döngüsü
 setInterval(controlTick, 250);
+
+/**
+ * Anlık senkron durumu — teşhis ve test için.
+ *
+ * Telemetri hücreleri 250 ms'lik tikte yazılıyor. İki sekmenin tik fazı farklı
+ * olduğu için hücreleri karşılaştırmak senkronu değil tik gecikmesini ölçer;
+ * testte tam olarak bu yanlış alarma yol açtı. Bu kanca hesabı çağrıldığı anda
+ * yapar ve okuma anını da verir, böylece iki sekme farklı anlarda okunsa bile
+ * karşılaştırma zamandan bağımsız kalır (target - atMs sabittir).
+ */
+globalThis.__sync = () => {
+  if (!state || !state.source || !player?.ready()) return null;
+  const atMs = Date.now();
+  return {
+    atMs,
+    targetMs: effectivePositionMs(state, atMs + clockOffsetMs),
+    actualMs: player.positionMs(),
+    offsetMs: clockOffsetMs,
+    version: state.version,
+    isPlaying: state.isPlaying,
+  };
+};
 
 function controlTick() {
   if (!state || !state.source || !player || !player.ready()) return;
@@ -645,36 +706,52 @@ function showScreenStage(stream) {
   void el.play().catch(() => {});
 }
 
+/**
+ * Karoları yerinde günceller.
+ *
+ * Önceden her çağrıda strip.innerHTML baştan kuruluyordu: oynayan her video
+ * elemanı yok edilip yeniden yaratılıyor, akış sıfırdan başlıyordu. Karo
+ * sayısı değişmese bile bu oluyordu, çünkü her yeni track render tetikliyor.
+ */
 function renderTiles() {
   const strip = $('video-strip');
-  const entries = [...remotes.entries()].filter(([, r]) => !r.screen);
   const local = mesh.stream;
 
   const tiles = [];
   if (local && (media.cam || media.mic) && !media.screen) {
     tiles.push({ id: 'self', name: 'Sen', stream: local, muted: true });
   }
-  for (const [id, r] of entries) tiles.push({ id, name: r.name, stream: r.stream, muted: false });
+  for (const [id, r] of remotes) {
+    if (!r.screen) tiles.push({ id, name: r.name, stream: r.stream, muted: false });
+  }
 
   strip.classList.toggle('is-hidden', tiles.length === 0);
-  strip.innerHTML = tiles.map((t) => {
-    const hasVideo = t.stream.getVideoTracks().some((tr) => tr.enabled && tr.readyState === 'live');
-    return hasVideo
-      ? `<div class="tile" data-tile="${t.id}">
-           <video autoplay playsinline ${t.muted ? 'muted' : ''}></video>
-           <span class="tile-name">${escapeHtml(t.name)}</span>
-         </div>`
-      : `<div class="tile audio-only" data-tile="${t.id}">
-           <span class="ring">${escapeHtml(initials(t.name))}</span>
-           <span class="tile-name">${escapeHtml(t.name)}</span>
-           <video autoplay playsinline ${t.muted ? 'muted' : ''} style="display:none"></video>
-         </div>`;
-  }).join('');
 
+  const alive = new Set();
   for (const t of tiles) {
-    const v = strip.querySelector(`[data-tile="${t.id}"] video`);
-    if (v) v.srcObject = t.stream;
+    alive.add(t.id);
+    let el = strip.querySelector(`[data-tile="${CSS.escape(t.id)}"]`);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'tile';
+      el.dataset.tile = t.id;
+      el.innerHTML = '<span class="ring"></span><video autoplay playsinline></video><span class="tile-name"></span>';
+      strip.append(el);
+    }
+
+    // "canlı ama sessize alınmış" = karşı taraf kamerayı kapatmış demek.
+    const hasVideo = t.stream.getVideoTracks().some((tr) => tr.readyState === 'live' && !tr.muted);
+    el.classList.toggle('audio-only', !hasVideo);
+    el.querySelector('.ring').textContent = initials(t.name);
+    el.querySelector('.tile-name').textContent = t.name;
+
+    const v = el.querySelector('video');
+    v.muted = t.muted;
+    if (v.srcObject !== t.stream) v.srcObject = t.stream;
+    void v.play().catch(() => {});
   }
+
+  for (const el of [...strip.children]) if (!alive.has(el.dataset.tile)) el.remove();
 }
 
 // Bir eş ekranını paylaşıyorsa akışı karo yerine büyük sahnede göster.
@@ -696,6 +773,57 @@ function routeScreenShare(members) {
     void el.play().catch(() => {});
   }
 }
+
+// ═══════════════════════════════════════════════════════ Ortak tarayıcı
+let browserActive = false;
+/** Oda girişinde açılan ortak tarayıcı soketinin sonucu. */
+let bwReady = Promise.resolve(false);
+
+const sharedBrowser = createSharedBrowser({
+  canvas: $('browser-view'),
+  wsBase: BW_BASE,
+  getTicket: async (s) => (await api('POST', `/api/rooms/${s}/ticket`)).ticket,
+  onState: (st) => {
+    const was = browserActive;
+    browserActive = Boolean(st.active);
+    $('browser-view').hidden = !browserActive;
+    $('btn-browser').dataset.on = String(browserActive);
+    // Bu modda ortak bir zaman çizgisi yok; oynat/duraklat hiçbir işe yaramaz.
+    $('screen-room').classList.toggle('browser-mode', browserActive);
+    if (browserActive) {
+      $('stage-empty').classList.add('is-hidden');
+      $('browser-view').focus();
+      if (!was && st.by) addSystem(`${st.by} ortak tarayıcıyı açtı`);
+    } else if (was) {
+      addSystem('Ortak tarayıcı kapatıldı');
+    }
+    updateLinkbar();
+  },
+  onUrl: (u) => { if (browserActive && document.activeElement !== $('stage-url')) $('stage-url').value = u; },
+  onError: (m) => addSystem(m),
+});
+
+// Bağlantı çubuğu iki işe birden bakıyor; hangisinde olduğumuz belli olsun.
+function updateLinkbar() {
+  $('stage-url').placeholder = browserActive
+    ? 'Adres yaz ve Enter\'a bas'
+    : 'YouTube bağlantısını buraya yapıştır ve Enter\'a bas';
+  $('btn-stage-url').textContent = browserActive ? 'Git' : 'Oynat';
+  $('linkbar-icon').textContent = browserActive ? '🌐' : '▶';
+}
+
+async function openSharedBrowser(url) {
+  if (!await bwReady) {
+    addSystem('Ortak tarayıcı servisi çalışmıyor (npm run dev:browser).');
+    return;
+  }
+  sharedBrowser.start(url || 'https://www.wikipedia.org');
+}
+
+$('btn-browser').onclick = () => {
+  if (browserActive) { sharedBrowser.stop(); return; }
+  void openSharedBrowser($('stage-url').value.trim());
+};
 
 // ════════════════════════════════════════════════════════════ Arayüz
 function renderMembers(members) {

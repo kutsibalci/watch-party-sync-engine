@@ -5,11 +5,12 @@
 [![CI](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/Node-24-3c873a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Test](https://img.shields.io/badge/tests-79%20scenarios-3ecf8e)
+![Test](https://img.shields.io/badge/tests-83%20scenarios-3ecf8e)
 
 A real-time synchronisation engine for watching video together: YouTube, your own
-uploads or a shared screen — plus voice and video chat, a transcoding pipeline and
-a horizontally scalable WebSocket layer.
+uploads, a shared screen, or a browser that runs on the server and everyone drives
+together — plus voice and video chat, a transcoding pipeline and a horizontally
+scalable WebSocket layer.
 
 **It does not touch DRM-protected content** — it works on files you upload yourself
 and on YouTube. That is a deliberate scope decision; the reasoning is
@@ -19,7 +20,7 @@ and on YouTube. That is a deliberate scope decision; the reasoning is
 > stateful real-time systems, asynchronous job processing and horizontal scaling
 > **with measured results**.
 
-**Status:** phases 0–4 complete · **79 automated tests** (including a real Chrome test) ·
+**Status:** phases 0–6 complete · **83 automated tests** (including a real Chrome test) ·
 type-check clean · production image runs as a non-root user
 
 <p align="center">
@@ -208,13 +209,13 @@ workers claim simultaneously and exactly one wins**.
 ```bash
 npm run typecheck       # tsc, two configurations
 npm run smoke           # 13 · health, auth, error paths, security behaviour
-npm run sync-test       # 21 · sync engine, clock, versioning, tickets, host handover
+npm run sync-test       # 24 · sync engine, clock, versioning, tickets, host handover
 npm run pipeline-test   # 14 · queue mechanics + a real ffmpeg transcode
 npm run scale-test      # 12 · consistency across two instances
-npm run browser-test    # 19 · real Chrome, two tabs (watch it with HEADLESS=0)
+npm run browser-test    # 20 · real Chrome, two tabs (watch it with HEADLESS=0)
 ```
 
-**79 scenarios** in total, all of them running in CI as well.
+**83 scenarios** in total, all of them running in CI as well.
 
 The tests check more than "does it work" — they check **security behaviour**: whether
 the password hash leaks, whether the user-enumeration messages are identical, whether
@@ -264,6 +265,7 @@ added that makes a silent hang impossible — **a silent hang is worse than a fa
 | API | http://127.0.0.1:8090 | REST, auth, health, metrics |
 | Test client | http://127.0.0.1:8090/app/ | |
 | Realtime #1 / #2 | :8091 / :8092 | state shared in Redis |
+| Shared browser | :8094 | one server-side Chromium tab per room |
 | Grafana | http://127.0.0.1:3000 | dashboard provisioned as code |
 | Prometheus | http://127.0.0.1:9090 | |
 | MinIO console | http://127.0.0.1:9001 | `minioadmin` / `minioadmin` |
@@ -292,6 +294,15 @@ Connect with `ws://127.0.0.1:8091/ws?room=<slug>&ticket=<ticket>`
 |---|---|
 | `PING` `PLAY` `PAUSE` `SEEK` | `HELLO` `PONG` `STATE` `PRESENCE` |
 | `SET_SOURCE` *(host)* `HEARTBEAT` `CHAT` | `CHAT` `VIDEO_PROGRESS` `ERROR` |
+| `RTC_SIGNAL` `RTC_MEDIA` | `RTC_SIGNAL` `RTC_MEDIA` |
+
+The shared browser speaks on its own socket — `ws://127.0.0.1:8094/browser?ticket=<ticket>`.
+Frames arrive as binary frames, input events go out as JSON.
+
+| Client → Server | Server → Client |
+|---|---|
+| `BROWSER_START` `BROWSER_NAV` `BROWSER_STOP` | `BROWSER_STATE` `BROWSER_URL` |
+| `BROWSER_MOUSE` `BROWSER_KEY` | *(binary JPEG frame)* |
 
 Diagnostics: `GET :8091/debug/rooms/:slug` — calling it on both ports and seeing the
 same state is the shortest proof that sharing works.
@@ -468,6 +479,7 @@ src/
 │   └── password.ts · jwt.ts · errors.ts
 ├── api/               stateless REST
 ├── realtime/          stateful WebSocket — Redis Lua scripts live in room.ts
+├── browser/           shared browser: one server-side Chromium per room (CDP screencast)
 └── worker/            ffprobe + ffmpeg → HLS
 
 ops/       prometheus · grafana dashboard (as code) · k6 scenario
@@ -502,9 +514,14 @@ scripts/   migration tool + four test suites
   server** — only public STUN. Users behind symmetric NAT (corporate networks, some
   mobile carriers) may fail to connect; a real deployment needs coturn. The mesh is
   capped at 6 participants; beyond that an SFU is needed.
-- No shared browser (Rabb.it / Hyperbeam style): running a headless browser on the
-  server and streaming it is separate infrastructure with a real cost line. Screen
-  sharing covers the same need at zero server cost.
+- The shared browser has **no audio**: CDP screencast gives video only. For watching
+  something together with sound, the YouTube mode exists and runs on the sync engine.
+- The shared browser **does not scale horizontally**: a room's tab lives in one
+  specific process, so multiple replicas would need sticky routing by slug. One
+  Chromium tab per room is also a real cost line — the one that killed Rabb.it — so
+  the default cap is 4 concurrent rooms.
+- Shared-browser bandwidth is ~51 KB per frame (960x540, JPEG q45). A still page sends
+  nothing; while scrolling it is roughly 750 KB/s per viewer.
 - The load test hits its own bottleneck past 2,500 VUs in a single k6 container —
   going higher needs multiple generators.
 

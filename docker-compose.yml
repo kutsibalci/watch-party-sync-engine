@@ -193,6 +193,38 @@ services:
     ports:
       - "8092:8091"
 
+  # Ortak tarayıcı: oda başına sunucuda bir Chromium sekmesi. Ayrı süreç ve
+  # ayrı imaj — bir odanın tarayıcı yükü senkron motorunu etkilemesin.
+  #
+  # YATAY ÖLÇEKLENMEZ: bir odanın sekmesi belirli bir süreçte yaşar. Birden
+  # fazla kopya çalıştırılacaksa slug'a göre yapışkan yönlendirme gerekir.
+  browser:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: Dockerfile.browser
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      BROWSER_PORT: "8094"
+      INSTANCE_ID: browser-1
+      DATABASE_URL: postgres://watch:watch@postgres:5432/watchparty
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-gelistirme-icin-en-az-32-karakterlik-gecici-anahtar}
+      S3_PUBLIC_ENDPOINT: http://127.0.0.1:9000
+      S3_BUCKET: media
+      LOG_LEVEL: debug
+    ports:
+      - "8094:8094"
+    volumes:
+      - ./src:/app/src:ro
+    # Chromium /dev/shm kullanır; varsayılan 64 MB sekmeyi çökertir.
+    # --disable-dev-shm-usage bayrağı da var ama alan vermek daha sağlıklı.
+    shm_size: 512mb
+    depends_on:
+      redis:
+        condition: service_healthy
+
   worker:
     profiles: ["app"]
     build:

@@ -28,6 +28,7 @@ const BaseSchema = z.object({
   // varsayılanları çakışmayan portlara aldık.
   API_PORT: z.coerce.number().int().min(1).max(65535).default(8090),
   REALTIME_PORT: z.coerce.number().int().min(1).max(65535).default(8091),
+  BROWSER_PORT: z.coerce.number().int().min(1).max(65535).default(8094),
 
   /** Bu sürecin kimliği. Faz 3'te loglarda ve presence kayıtlarında görünür. */
   INSTANCE_ID: z.string().min(1).default('local'),
@@ -61,8 +62,19 @@ const StorageSchema = z.object({
   S3_SECRET_KEY: z.string().min(1),
 });
 
+/** Yalnızca ortak tarayıcı servisi için — diğer servislerin Chrome'a ihtiyacı yok. */
+const BrowserSchema = z.object({
+  /** Boşsa bilinen kurulum yollarında aranır. */
+  CHROME_PATH: z.string().min(1).optional(),
+  /** Son izleyici ayrıldıktan sonra sayfa bu süre boyunca açık kalır. */
+  BROWSER_IDLE_MS: z.coerce.number().int().positive().default(120_000),
+  /** Aynı anda açık tutulabilecek oda sayısı — her biri bir Chrome sekmesi. */
+  BROWSER_MAX_SESSIONS: z.coerce.number().int().positive().default(4),
+});
+
 export type Config = z.infer<typeof BaseSchema>;
 export type StorageConfig = z.infer<typeof StorageSchema>;
+export type BrowserConfig = z.infer<typeof BrowserSchema>;
 
 function parseSection<S extends z.ZodTypeAny>(schema: S, label: string): z.infer<S> {
   const parsed = schema.safeParse(process.env);
@@ -89,6 +101,10 @@ export const config: Config = parseSection(BaseSchema, 'temel');
  */
 export function loadStorageConfig(): StorageConfig {
   return parseSection(StorageSchema, 'storage');
+}
+
+export function loadBrowserConfig(): BrowserConfig {
+  return parseSection(BrowserSchema, 'ortak tarayıcı');
 }
 
 export const isProduction = config.NODE_ENV === 'production';

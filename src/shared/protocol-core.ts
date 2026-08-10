@@ -112,7 +112,16 @@ export function decideDriftAction(
 }
 
 // ----------------------------------------------------------- Saat senkronu
-export type ClockSample = { offsetMs: number; rttMs: number };
+export type ClockSample = { offsetMs: number; rttMs: number; atMs: number };
+
+/**
+ * Bir saat örneğinin geçerli sayıldığı süre.
+ *
+ * Sunucunun saati sabit varsayılamaz: sanal makineler askıya alınıp
+ * uyandığında ya da NTP düzeltmesi geldiğinde saat sıçrar veya kayar. Bu
+ * ortamda ölçtüğümüz Docker VM'i dakikada ~1 saniye kayıyordu.
+ */
+export const CLOCK_SAMPLE_MAX_AGE_MS = 120_000;
 
 // NTP hesabı:
 //   RTT    = (t3 - t0) - (t2 - t1)
@@ -126,12 +135,56 @@ export function computeClockSample(
   return {
     rttMs: t3 - t0 - (t2 - t1),
     offsetMs: (t1 - t0 + (t2 - t3)) / 2,
+    atMs: t3,
   };
 }
 
-// Medyan yerine en düşük RTT'li örnek: o pakette kuyruk gecikmesi en az,
-// dolayısıyla offset tahmini en az bulanık.
-export function bestSample(samples: readonly ClockSample[]): ClockSample | null {
+/** Kabul edilen RTT tavanı = en düşük RTT'nin bu katı. */
+const RTT_TOLERANCE = 2;
+
+/**
+ * Saat farkı tahmini: düşük gecikmeli TAZE örneklerin MEDYANI.
+ *
+ * Önceki sürüm tek bir örneği seçiyordu: en düşük RTT'li olanı. Gerekçe
+ * doğruydu (o pakette kuyruk gecikmesi en az, offset en az bulanık) ama
+ * yalnızca AĞ GÜRÜLTÜSÜNE karşı koruyor. Ölçtüğümüz arıza başkaydı: sunucunun
+ * saati saniyelerle sıçrıyordu. Sıçrama t1 ve t2'yi birlikte kaydırdığı için
+ * RTT'ye hiç dokunmaz - örnek 1 ms RTT ile kusursuz görünür, offset'i 1,3
+ * saniye yanlıştır. Tek örneğe bakan seçim bunu ayırt edemez.
+ *
+ * Ölçüm: RTT 1-4 ms bandındayken offset -1716 ile +861 arasında salındı.
+ * Medyan bu tür aykırı değerlere dayanıklı; düşük RTT filtresi de jitter
+ * korumasını koruyor.
+ *
+ * Tazelik şart: eskiden tüm geçmiş taranıyordu ve dakikalarca önce yakalanmış
+ * şanslı bir örnek sonsuza kadar kazanabiliyordu.
+ *
+ * Not: saati sürekli sıçrayan bir sunucuyu hiçbir istemci düzeltemez; bu
+ * altyapı arızasıdır. Buradaki iş tek tük aykırı örneğe teslim olmamak.
+ */
+export function bestSample(
+  samples: readonly ClockSample[],
+  nowMs: number,
+): ClockSample | null {
   if (samples.length === 0) return null;
-  return samples.reduce((best, s) => (s.rttMs < best.rttMs ? s : best));
+
+  const fresh = samples.filter((s) => nowMs - s.atMs <= CLOCK_SAMPLE_MAX_AGE_MS);
+  const pool = fresh.length > 0 ? fresh : [samples[samples.length - 1]!];
+
+  // Negatif RTT fiziksel olarak imkânsız: sunucu t1 ile t2 arasında takılmış
+  // ya da saati sıçramış demektir. Böyle bir örnek "en düşük RTT" yarışını
+  // kazanırdı; eliyoruz.
+  const sane = pool.filter((s) => s.rttMs >= 0);
+  const usable = sane.length > 0 ? sane : pool;
+
+  const minRtt = Math.min(...usable.map((s) => s.rttMs));
+  const lowJitter = usable.filter((s) => s.rttMs <= Math.max(minRtt * RTT_TOLERANCE, minRtt + 5));
+
+  const offsets = lowJitter.map((s) => s.offsetMs).sort((a, b) => a - b);
+  const mid = offsets.length >> 1;
+  const offsetMs = offsets.length % 2 === 1
+    ? offsets[mid]!
+    : (offsets[mid - 1]! + offsets[mid]!) / 2;
+
+  return { offsetMs, rttMs: minRtt, atMs: Math.max(...lowJitter.map((s) => s.atMs)) };
 }

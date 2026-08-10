@@ -351,23 +351,27 @@ try {
     return 'iki tarafta da ilerliyor';
   });
 
-  await check('İki sekmenin hedef pozisyonu birbirine yakın (< 250ms)', async () => {
+  /**
+   * İki sekme aynı zaman çizgisinde mi?
+   *
+   * Ekrandaki hücreleri okumuyoruz: onlar 250 ms'lik tikte yazılıyor ve iki
+   * sekmenin tiki aynı fazda değil, dolayısıyla aradaki fark senkronu değil
+   * tik gecikmesini yansıtır. Bunun yerine her sekmede hedefi ANLIK
+   * hesaplatıp `hedef - okuma anı` farkını karşılaştırıyoruz; oynatma hızı 1
+   * iken bu değer sabittir, yani iki okuma farklı anlarda olsa da sonuç değişmez.
+   */
+  await check('İki sekme aynı zaman çizgisinde (< 250ms)', async () => {
     await sleep(2500);
-    // Aynı anda oku ki ölçüm arası gecikme sonucu bozmasın
-    const [ta, tb] = await Promise.all([
-      pageA.evaluate(() => document.querySelector('#t-target')?.textContent ?? ''),
-      pageB.evaluate(() => document.querySelector('#t-target')?.textContent ?? ''),
+    const [a, b] = await Promise.all([
+      pageA.evaluate(() => (globalThis as any).__sync?.()),
+      pageB.evaluate(() => (globalThis as any).__sync?.()),
     ]);
-    const toMs = (s: string) => {
-      const m = /(\d+):(\d+)\.(\d+)/.exec(s);
-      return m ? Number(m[1]) * 60000 + Number(m[2]) * 1000 + Number(m[3]) : NaN;
-    };
-    const a = toMs(ta);
-    const b = toMs(tb);
-    assert(Number.isFinite(a) && Number.isFinite(b), `okunamadı: "${ta}" / "${tb}"`);
-    const delta = Math.abs(a - b);
-    assert(delta < 250, `hedefler ayrışmış: Δ=${delta}ms (${ta} vs ${tb})`);
-    return `A=${ta} B=${tb} Δ=${delta}ms`;
+    assert(a && b, `senkron kancası okunamadı: ${JSON.stringify({ a, b })}`);
+
+    const anchor = (s: { targetMs: number; atMs: number }) => s.targetMs - s.atMs;
+    const delta = Math.abs(anchor(a) - anchor(b));
+    assert(delta < 250, `zaman çizgileri ayrışmış: Δ=${delta.toFixed(0)}ms`);
+    return `Δ=${delta.toFixed(0)}ms · offset A=${a.offsetMs.toFixed(0)} B=${b.offsetMs.toFixed(0)}`;
   });
 
   /**
@@ -530,6 +534,45 @@ try {
     assert(isHost, 'B host olmadı');
     return 'B → host';
   });
+
+  // Ortak tarayıcı ayrı ve İSTEĞE BAĞLI bir servis; çalışmıyorsa oda normal
+  // çalışmaya devam eder, o yüzden test de atlanır, kırılmaz.
+  const browserSvc = await fetch('http://127.0.0.1:8094/healthz')
+    .then((r) => r.ok)
+    .catch(() => false);
+
+  if (!browserSvc) {
+    skip('Ortak tarayıcı sahnede açılıyor', 'servis çalışmıyor (npm run dev:browser)');
+  } else {
+    await check('Ortak tarayıcı sahnede açılıyor ve kare çiziliyor', async () => {
+      await click(pageB, '#btn-browser');
+      await pageB.waitForFunction(
+        () => document.getElementById('browser-view')?.hidden === false,
+        { timeout: 25_000, polling: 250 },
+      );
+
+      // Canvas boş mu, gerçekten bir şey çizildi mi? Piksellere bakıyoruz:
+      // "hidden değil" tek başına bir şey ispatlamıyor.
+      const painted = await pageB.waitForFunction(
+        () => {
+          const c = document.getElementById('browser-view') as HTMLCanvasElement | null;
+          if (!c) return false;
+          const ctx = c.getContext('2d');
+          const d = ctx?.getImageData(0, 0, c.width, c.height).data;
+          if (!d) return false;
+          for (let i = 0; i < d.length; i += 4 * 997) {
+            if (d[i] !== 0 || d[i + 1] !== 0 || d[i + 2] !== 0) return true;
+          }
+          return false;
+        },
+        { timeout: 25_000, polling: 500 },
+      ).then(() => true).catch(() => false);
+
+      assert(painted, 'canvas boş kaldı — kare gelmedi');
+      await click(pageB, '#btn-browser');   // kapat
+      return 'sunucu tarayıcısı çizildi';
+    });
+  }
 
   await check('Odadan çıkınca oda ana ekranda listeleniyor', async () => {
     await click(pageB, '#btn-leave');

@@ -5,11 +5,12 @@
 [![CI](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/Node-24-3c873a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Test](https://img.shields.io/badge/test-79%20senaryo-3ecf8e)
+![Test](https://img.shields.io/badge/test-83%20senaryo-3ecf8e)
 
 Arkadaşlarınla aynı anda video izlemeyi sağlayan gerçek zamanlı senkron motoru:
-YouTube, kendi yüklediğin videolar veya ekran paylaşımı — üstüne sesli ve
-görüntülü sohbet, transkod hattı ve yatay ölçeklenebilir WebSocket katmanı.
+YouTube, kendi yüklediğin videolar, ekran paylaşımı ya da sunucuda açılan
+ortak bir tarayıcı — üstüne sesli ve görüntülü sohbet, transkod hattı ve
+yatay ölçeklenebilir WebSocket katmanı.
 
 **DRM'li içeriğe dokunmaz** — kendi yüklediğin dosyalar ve YouTube üzerinde
 çalışır. Bu bilinçli bir kapsam kararıdır; gerekçesi
@@ -19,7 +20,7 @@ görüntülü sohbet, transkod hattı ve yatay ölçeklenebilir WebSocket katman
 > zamanlı sistemler, asenkron iş işleme ve yatay ölçeklemeyi **ölçülmüş
 > sonuçlarla** göstermek.
 
-**Durum:** Faz 0–4 tamamlandı · **79 otomatik test** (gerçek Chrome testi dahil) ·
+**Durum:** Faz 0–6 tamamlandı · **83 otomatik test** (gerçek Chrome testi dahil) ·
 tip kontrolü temiz · üretim imajı root olmayan kullanıcıyla çalışıyor
 
 <p align="center">
@@ -27,8 +28,8 @@ tip kontrolü temiz · üretim imajı root olmayan kullanıcıyla çalışıyor
 </p>
 
 <p align="center">
-  <img src="docs/ekran/kaynak-secimi.png" width="49%" alt="Kaynak seçimi: YouTube, kendi videon veya ekran paylaşımı" />
-  <img src="docs/ekran/giris.png" width="49%" alt="Giriş ekranı" />
+  <img src="docs/ekran/ortak-tarayici.png" width="49%" alt="Ortak tarayıcı: sunucuda açılan sekme odadaki herkese akıyor" />
+  <img src="docs/ekran/kaynak-secimi.png" width="49%" alt="Kaynak seçimi: YouTube, kendi videon, ekran paylaşımı veya ortak tarayıcı" />
 </p>
 ---
 
@@ -204,13 +205,13 @@ anda claim ettiğini ve tam olarak 1'inin kazandığını** doğruluyor.
 ```bash
 npm run typecheck       # tsc, iki yapılandırma
 npm run smoke           # 13 · sağlık, auth, hata yolları, güvenlik davranışı
-npm run sync-test       # 21 · senkron motoru, saat, versiyon, bilet, host devri
+npm run sync-test       # 24 · senkron motoru, saat, versiyon, bilet, host devri
 npm run pipeline-test   # 14 · kuyruk mekanizmaları + gerçek ffmpeg transkodu
 npm run scale-test      # 12 · iki instance arası tutarlılık
-npm run browser-test    # 19 · gerçek Chrome, iki sekme (HEADLESS=0 ile izle)
+npm run browser-test    # 20 · gerçek Chrome, iki sekme (HEADLESS=0 ile izle)
 ```
 
-Toplam **79 senaryo**, hepsi CI'da da koşuyor.
+Toplam **83 senaryo**, hepsi CI'da da koşuyor.
 
 Testler yalnızca "çalışıyor mu"yu değil **güvenlik davranışını** da doğruluyor:
 parola özeti sızıyor mu, kullanıcı numaralandırma mesajları aynı mı, bilet
@@ -261,6 +262,7 @@ kötüdür.**
 | API | http://127.0.0.1:8090 | REST, auth, sağlık, metrikler |
 | Test istemcisi | http://127.0.0.1:8090/app/ | |
 | Realtime #1 / #2 | :8091 / :8092 | state Redis'te paylaşımlı |
+| Ortak tarayıcı | :8094 | oda başına sunucuda bir Chromium sekmesi |
 | Grafana | http://127.0.0.1:3000 | pano kod olarak sağlanır |
 | Prometheus | http://127.0.0.1:9090 | |
 | MinIO konsolu | http://127.0.0.1:9001 | `minioadmin` / `minioadmin` |
@@ -289,6 +291,15 @@ Bağlantı: `ws://127.0.0.1:8091/ws?room=<slug>&ticket=<bilet>`
 |---|---|
 | `PING` `PLAY` `PAUSE` `SEEK` | `HELLO` `PONG` `STATE` `PRESENCE` |
 | `SET_SOURCE` *(host)* `HEARTBEAT` `CHAT` | `CHAT` `VIDEO_PROGRESS` `ERROR` |
+| `RTC_SIGNAL` `RTC_MEDIA` | `RTC_SIGNAL` `RTC_MEDIA` |
+
+Ortak tarayıcı ayrı bir sokette konuşur — `ws://127.0.0.1:8094/browser?ticket=<bilet>`.
+Kareler ikili çerçeve olarak iner, girdi olayları JSON olarak çıkar.
+
+| İstemci → Sunucu | Sunucu → İstemci |
+|---|---|
+| `BROWSER_START` `BROWSER_NAV` `BROWSER_STOP` | `BROWSER_STATE` `BROWSER_URL` |
+| `BROWSER_MOUSE` `BROWSER_KEY` | *(ikili JPEG kare)* |
 
 Teşhis: `GET :8091/debug/rooms/:slug` — iki porttan da çağırıp aynı state'i
 görmek, paylaşımın çalıştığının en kısa kanıtı.
@@ -465,11 +476,12 @@ src/
 │   └── password.ts · jwt.ts · errors.ts
 ├── api/               stateless REST
 ├── realtime/          stateful WebSocket — room.ts içinde Redis Lua betikleri
+├── browser/           ortak tarayıcı: oda başına sunucu Chromium'u + CDP screencast
 └── worker/            ffprobe + ffmpeg → HLS
 
 ops/       prometheus · grafana panosu (kod olarak) · k6 senaryosu
 docs/      yük testi analizi · Faz 3 kırılma öncesi/sonrası ham çıktılar
-scripts/   migration aracı + dört test paketi
+scripts/   migration aracı + beş test paketi
 ```
 
 ---
@@ -498,9 +510,14 @@ scripts/   migration aracı + dört test paketi
   **TURN sunucusu yok**, yalnızca genel STUN var. Simetrik NAT arkasındaki
   kullanıcılar (kurumsal ağlar, bazı mobil operatörler) bağlanamayabilir;
   gerçek dağıtımda coturn şart. Mesh 6 katılımcıyla sınırlı — ötesi SFU işi.
-- Ortak tarayıcı (Rabb.it/Hyperbeam tarzı) yok: sunucuda headless tarayıcı
-  çalıştırıp yayınlamak ayrı bir altyapı ve ciddi bir maliyet kalemi.
-  Ekran paylaşımı aynı ihtiyacı sıfır sunucu maliyetiyle karşılıyor.
+- Ortak tarayıcıda **ses yok**: CDP screencast yalnızca görüntü verir. Sesli
+  birlikte izlemek için YouTube modu var, o senkron motoruyla çalışıyor.
+- Ortak tarayıcı **yatay ölçeklenmez**: bir odanın sekmesi belirli bir süreçte
+  yaşar. Birden fazla kopya için slug'a göre yapışkan yönlendirme gerekir.
+  Ayrıca oda başına bir Chromium sekmesi ciddi bir maliyet kalemi — Rabb.it'i
+  batıran kalem buydu; varsayılan tavan 4 eşzamanlı oda.
+- Ortak tarayıcıda bant genişliği kare başına ~51 KB (960x540, JPEG q45).
+  Sayfa durgunken hiç kare gitmez; kaydırırken izleyici başına ~750 KB/sn.
 - Yük testi k6 tek konteynerde 2.500 VU'dan sonra kendi darboğazına giriyor —
   daha yükseği için birden fazla üreteç gerekir.
 

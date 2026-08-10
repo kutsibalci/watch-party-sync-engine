@@ -16,7 +16,7 @@ const ICE = {
 };
 
 export function createMesh({ send, onRemote, onDrop, onError }) {
-  /** @type {Map<string, {pc: RTCPeerConnection, polite: boolean, makingOffer: boolean, ignoreOffer: boolean, senders: RTCRtpSender[]}>} */
+  /** @type {Map<string, {pc: RTCPeerConnection, polite: boolean, makingOffer: boolean, ignoreOffer: boolean, remote: MediaStream}>} */
   const peers = new Map();
   let selfId = '';
   let localStream = null;
@@ -41,14 +41,42 @@ export function createMesh({ send, onRemote, onDrop, onError }) {
     if (existing) return existing;
 
     const pc = new RTCPeerConnection(ICE);
-    const entry = { pc, polite: !shouldInitiateTo(selfId, peerId), makingOffer: false, ignoreOffer: false, senders: [] };
+    const entry = {
+      pc,
+      polite: !shouldInitiateTo(selfId, peerId),
+      makingOffer: false,
+      ignoreOffer: false,
+      remote: new MediaStream(),
+      /** Tür başına tek gönderici; akış değişince track'i yerinde takas ediyoruz. */
+      tx: { audio: null, video: null },
+    };
     peers.set(peerId, entry);
 
     pc.onicecandidate = (e) => {
       if (e.candidate) send(peerId, { kind: 'ice', candidate: e.candidate.toJSON() });
     };
 
-    pc.ontrack = (e) => onRemote(peerId, peerName, e.streams[0]);
+    /**
+     * Her track için ayrı ateşlenir. Önce e.streams[0]'ı doğrudan yukarı
+     * veriyordum: mikrofon açılıp sonra kamera açılınca yeniden pazarlık
+     * oluyor, son ateşlenen olay yalnızca sesi taşıyan bir akışla geliyor ve
+     * video karoya hiç ulaşmıyordu. Bağlantı gayet çalışıyordu - kareler
+     * çözülüyordu ama gösterdiğimiz akışın içinde yoktu.
+     *
+     * Artık eş başına kendi akışımızı tutup track'leri ona ekliyoruz.
+     */
+    pc.ontrack = (e) => {
+      const { remote } = entry;
+      if (!remote.getTracks().includes(e.track)) remote.addTrack(e.track);
+      e.track.onended = () => {
+        remote.removeTrack(e.track);
+        onRemote(peerId, peerName, remote);
+      };
+      // Uzak taraf track'i kapattığında "mute" gelir, "ended" gelmez.
+      e.track.onmute = () => onRemote(peerId, peerName, remote);
+      e.track.onunmute = () => onRemote(peerId, peerName, remote);
+      onRemote(peerId, peerName, remote);
+    };
 
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === 'failed' || pc.connectionState === 'closed') drop(peerId);
@@ -66,13 +94,27 @@ export function createMesh({ send, onRemote, onDrop, onError }) {
       }
     };
 
-    attachLocalTracks(entry);
+    void applyLocalTracks(entry);
     return entry;
   }
 
-  function attachLocalTracks(entry) {
-    if (!localStream) return;
-    entry.senders = localStream.getTracks().map((t) => entry.pc.addTrack(t, localStream));
+  /**
+   * Yerel akışı eşe yansıtır.
+   *
+   * Eskiden her değişiklikte tüm göndericiler kaldırılıp yeniden ekleniyordu;
+   * bu her seferinde yeni transceiver ve tam yeniden pazarlık demek. Artık tür
+   * başına tek gönderici tutup track'i yerinde takas ediyoruz: replaceTrack
+   * yeniden pazarlık gerektirmez, kamera/ekran geçişi anında olur.
+   */
+  async function applyLocalTracks(entry) {
+    const jobs = [];
+    for (const kind of ['audio', 'video']) {
+      const track = localStream?.getTracks().find((t) => t.kind === kind) ?? null;
+      const sender = entry.tx[kind];
+      if (sender) jobs.push(sender.replaceTrack(track));
+      else if (track) entry.tx[kind] = entry.pc.addTrack(track, localStream);
+    }
+    await Promise.all(jobs).catch((e) => onError?.(`akış değiştirilemedi: ${e.message}`));
   }
 
   async function handleSignal(fromId, fromName, data) {
@@ -134,18 +176,13 @@ export function createMesh({ send, onRemote, onDrop, onError }) {
     onDrop?.(peerId);
   }
 
-  /** Yerel akışı değiştirir; her eşte yeniden pazarlık kendiliğinden tetiklenir. */
+  /** Yerel akışı değiştirir. Yeni bir tür eklenmedikçe yeniden pazarlık gerekmez. */
   async function setLocalStream(stream) {
     const old = localStream;
     localStream = stream;
 
-    for (const entry of peers.values()) {
-      for (const s of entry.senders) {
-        try { entry.pc.removeTrack(s); } catch { /* bağlantı kapanmış olabilir */ }
-      }
-      entry.senders = [];
-      attachLocalTracks(entry);
-    }
+    // Takas bitmeden eski track'leri durdurursak araya boşluk giriyor.
+    await Promise.all([...peers.values()].map((e) => applyLocalTracks(e)));
 
     if (old && old !== stream) for (const t of old.getTracks()) t.stop();
   }

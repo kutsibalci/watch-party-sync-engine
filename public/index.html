@@ -170,6 +170,11 @@
         <strong>Ekran paylaş</strong>
         <small>Canlı yayınla — tarayıcın, oyunun, sunumun</small>
       </button>
+      <button class="source-opt" data-source="browser">
+        <span class="source-icon ico-web">🌐</span>
+        <strong>Ortak tarayıcı</strong>
+        <small>Sunucuda açılır, herkes birlikte kullanır</small>
+      </button>
     </div>
 
     <div id="source-youtube" class="source-pane">
@@ -196,6 +201,21 @@
       </p>
     </div>
 
+    <div id="source-browser" class="source-pane is-hidden">
+      <label class="field">
+        <span>Açılacak adres</span>
+        <input id="bw-url" type="text" value="https://www.wikipedia.org" spellcheck="false" />
+      </label>
+      <p class="muted small">
+        Tarayıcı senin bilgisayarında değil <strong>sunucuda</strong> açılır; odadaki
+        herkes aynı sekmeyi görür ve tıklayabilir.
+      </p>
+      <p class="note">
+        Bu modda <strong>ses yok</strong> ve senkron motoru devrede değil. Sesli
+        birlikte izlemek için YouTube modunu kullan.
+      </p>
+    </div>
+
     <div class="sheet-foot">
       <p id="source-status" class="status"></p>
       <button id="btn-source-go" class="btn btn-primary">Odayı aç</button>
@@ -213,17 +233,25 @@
     </div>
     <div class="spacer"></div>
     <div id="conn-state" class="pill pill-off">bağlanıyor…</div>
-    <button id="btn-source" class="btn btn-quiet btn-sm">Kaynağı değiştir</button>
     <button id="btn-invite" class="btn btn-primary btn-sm">Davet et</button>
     <button id="btn-debug" class="btn btn-quiet btn-sm" title="Senkron ayrıntıları">⚙</button>
   </header>
 
   <main class="room">
     <div class="stage-col">
+      <div class="linkbar">
+        <span id="linkbar-icon" class="linkbar-icon">▶</span>
+        <input id="stage-url" type="text" spellcheck="false"
+               placeholder="YouTube bağlantısını buraya yapıştır ve Enter'a bas" />
+        <button id="btn-stage-url" class="btn btn-primary btn-sm">Oynat</button>
+        <button id="btn-source" class="btn btn-quiet btn-sm">Diğer kaynaklar</button>
+      </div>
+
       <div class="stage">
         <div id="player"></div>
         <video id="video" playsinline hidden></video>
         <video id="screen-view" playsinline autoplay hidden></video>
+        <canvas id="browser-view" tabindex="0" hidden></canvas>
         <div id="stage-empty" class="stage-empty">
           <span>🎬</span>
           <p>Henüz bir kaynak seçilmedi</p>
@@ -245,6 +273,7 @@
         <button id="btn-mic" class="btn btn-media" data-on="false"><span>🎙</span> Mikrofon</button>
         <button id="btn-cam" class="btn btn-media" data-on="false"><span>📷</span> Kamera</button>
         <button id="btn-screen" class="btn btn-media" data-on="false"><span>🖥</span> Ekran paylaş</button>
+        <button id="btn-browser" class="btn btn-media" data-on="false"><span>🌐</span> Ortak tarayıcı</button>
         <div class="spacer"></div>
         <span id="media-note" class="muted small"></span>
       </div>

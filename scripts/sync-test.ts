@@ -15,6 +15,8 @@ import { WebSocket } from 'ws';
 import {
   computeClockSample,
   effectivePositionMs,
+  bestSample,
+  CLOCK_SAMPLE_MAX_AGE_MS,
   type ClockSample,
   type Member,
   type PlaybackState,
@@ -495,6 +497,74 @@ await check('Var olmayan odaya bağlanılamıyor', async () => {
   });
   assert(code === 1008, `beklenen 1008, gelen ${code}`);
   return 'kod 1008';
+});
+
+// ─────────────────────────────────── Saat tahmini: aykırı örneğe dayanıklılık
+//
+// Bu senaryolar ağa çıkmaz; tahmin fonksiyonunun kendisini sınar. Gerçek bir
+// arızadan doğdular: bu makinedeki Docker VM'inin saati saniyelerle sıçrıyordu
+// ve iki sekme 2,5 saniye ayrışmıştı. Sıçrama t1 ile t2'yi birlikte kaydırdığı
+// için RTT'ye dokunmuyor - örnek 1 ms RTT ile kusursuz görünüyor ama offset'i
+// saniyelerce yanlış. "En düşük RTT'li örneği seç" bunu ayırt edemiyordu.
+
+/** Ölçülen gerçek desen: RTT hep 1-4 ms, offset ise iki örnekte fırlamış. */
+function jumpyClockSamples(now: number): ClockSample[] {
+  const raw = [
+    { offsetMs: -1000, rttMs: 2 }, { offsetMs: -1010, rttMs: 3 },
+    { offsetMs: 861, rttMs: 1 },   { offsetMs: -995, rttMs: 2 },
+    { offsetMs: -1716, rttMs: 1 }, { offsetMs: -1005, rttMs: 4 },
+    { offsetMs: -1002, rttMs: 2 },
+  ];
+  return raw.map((r, i) => ({ ...r, atMs: now - (raw.length - i) * 1000 }));
+}
+
+await check('Saat tahmini sıçramış örneğe teslim olmuyor', async () => {
+  const now = Date.now();
+  const samples = jumpyClockSamples(now);
+
+  // Eski davranış: en düşük RTT'li örnek. Sıçramış örnekler tam da 1 ms'likler.
+  const minRtt = samples.reduce((b, s) => (s.rttMs < b.rttMs ? s : b));
+  assert(
+    Math.abs(minRtt.offsetMs - -1000) > 300,
+    'kurgu geçersiz: en düşük RTT\'li örnek zaten doğruyu veriyor',
+  );
+
+  const est = bestSample(samples, now);
+  assert(est !== null, 'tahmin üretilmedi');
+  assert(
+    Math.abs(est.offsetMs - -1000) < 50,
+    `tahmin sapıttı: ${est.offsetMs}ms (gerçek ≈ -1000ms, eski yöntem ${minRtt.offsetMs}ms)`,
+  );
+  return `medyan ${est.offsetMs}ms · eski yöntem ${minRtt.offsetMs}ms olurdu`;
+});
+
+await check('Bayat saat örnekleri tahmine karışmıyor', async () => {
+  const now = Date.now();
+  const stale: ClockSample[] = [
+    // Çok eski ama düşük RTT'li: eski kod bunu sonsuza kadar seçebiliyordu.
+    { offsetMs: -5000, rttMs: 1, atMs: now - CLOCK_SAMPLE_MAX_AGE_MS - 60_000 },
+    { offsetMs: -1000, rttMs: 3, atMs: now - 2_000 },
+    { offsetMs: -1004, rttMs: 3, atMs: now - 1_000 },
+  ];
+  const est = bestSample(stale, now)!;
+  assert(Math.abs(est.offsetMs - -1002) < 20, `bayat örnek tahmine sızdı: ${est.offsetMs}ms`);
+
+  // Hepsi bayatsa offsetsiz kalmaktansa en yenisini kullan.
+  const allStale = stale.map((s) => ({ ...s, atMs: now - CLOCK_SAMPLE_MAX_AGE_MS - 10_000 }));
+  assert(bestSample(allStale, now) !== null, 'hepsi bayatken tahmin üretilmedi');
+  return 'bayat elendi, tamamı bayatken geri düşüş çalışıyor';
+});
+
+await check('Negatif RTT\'li örnek eleniyor', async () => {
+  const now = Date.now();
+  // Sunucu t1 ile t2 arasında takılırsa RTT negatif çıkar ve offset yarısı
+  // kadar kayar. Fiziksel olarak imkânsız; kabul edilmemeli.
+  const s = computeClockSample(1000, 1500, 5000, 2000);
+  assert(s.rttMs < 0, `kurgu geçersiz: RTT ${s.rttMs}`);
+
+  const est = bestSample([s, { offsetMs: -1000, rttMs: 2, atMs: now }], now)!;
+  assert(est.offsetMs === -1000, `negatif RTT'li örnek seçildi: ${est.offsetMs}ms`);
+  return `RTT ${s.rttMs}ms elendi`;
 });
 
 B.close();

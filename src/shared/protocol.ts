@@ -81,3 +81,40 @@ export type ServerMessage =
   | { type: 'RTC_SIGNAL'; from: string; fromName: string; payload: string }
   | { type: 'RTC_MEDIA'; connectionId: string; media: MediaFlags }
   | { type: 'ERROR'; code: string; message: string };
+
+// ─────────────────────────────────────────── Ortak tarayıcı (ayrı servis)
+//
+// Bu mesajlar senkron motorundan geçmez; istemci ile tarayıcı servisi
+// arasındaki ayrı WebSocket üzerinde konuşulur. Girdi olayları sunucudaki
+// gerçek bir Chrome sekmesine basıldığı için şema burada da dar tutuluyor.
+
+const MOUSE_KINDS = ['mousePressed', 'mouseReleased', 'mouseMoved', 'mouseWheel'] as const;
+const KEY_KINDS = ['keyDown', 'keyUp', 'char'] as const;
+
+export const BrowserClientMessageSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('BROWSER_START'), url: z.string().min(1).max(2048) }),
+  z.object({ type: z.literal('BROWSER_NAV'), url: z.string().min(1).max(2048) }),
+  z.object({ type: z.literal('BROWSER_STOP') }),
+
+  z.object({
+    type: z.literal('BROWSER_MOUSE'),
+    kind: z.enum(MOUSE_KINDS),
+    // Görüntü ölçeklenebildiği için istemci sahne koordinatı değil, sayfanın
+    // kendi koordinatını gönderir.
+    x: z.number().finite(),
+    y: z.number().finite(),
+    button: z.enum(['none', 'left', 'middle', 'right']).optional(),
+    deltaX: z.number().finite().optional(),
+    deltaY: z.number().finite().optional(),
+  }),
+
+  z.object({
+    type: z.literal('BROWSER_KEY'),
+    kind: z.enum(KEY_KINDS),
+    key: z.string().max(32).optional(),
+    code: z.string().max(32).optional(),
+    text: z.string().max(8).optional(),
+    keyCode: z.number().int().min(0).max(255).optional(),
+  }),
+]);
+export type BrowserClientMessage = z.infer<typeof BrowserClientMessageSchema>;

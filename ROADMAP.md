@@ -16,7 +16,7 @@ hukuki risk yok, platform bağımlılığı yok, extension kırılması yok.
 
 ### v1'de YOK (bilinçli olarak)
 - Netflix / Disney+ / HBO Max → DRM duvarı, çözülemez
-- Sesli sohbet → Faz 5'e ertelendi
+- Sesli sohbet → Faz 5'te eklendi (mesh WebRTC, ≤6 kişi, TURN yok)
 - Mobil uygulama → web-first
 - Ödeme / abonelik → bu bir portföy projesi, ürün değil
 
@@ -126,9 +126,23 @@ RTT    = (t3 - t0) - (t2 - t1)
 offset = ((t1 - t0) + (t2 - t3)) / 2
 ```
 
-Bunu **8-10 kez** örnekleyin, **en düşük RTT'ye sahip** örneğin offset'ini kullanın
-(medyan da olur, ama en düşük RTT daha doğrudur — o pakette kuyruk gecikmesi en azdır).
-Bağlantı boyunca 30 saniyede bir yeniden ölçün.
+Bunu **8-10 kez** örnekleyin ve 30 saniyede bir yenileyin.
+
+> **Düzeltme (uygulamada değişti).** Burada önce "en düşük RTT'li örneği seçin,
+> o pakette kuyruk gecikmesi en azdır" yazıyordu. Gerekçe doğru ama yalnızca
+> **ağ gürültüsüne** karşı koruyor. Karşılaştığımız arıza başkaydı: sunucunun
+> saati saniyelerle sıçrıyordu. Sıçrama t1 ile t2'yi birlikte kaydırdığı için
+> RTT'ye hiç dokunmaz — örnek 1 ms RTT ile kusursuz görünür, offset'i 1,3 saniye
+> yanlıştır. Ölçüm: RTT 1-4 ms bandındayken offset -1716 ile +861 ms arasında
+> salındı ve iki sekme 2,5 saniye ayrıştı.
+>
+> Uygulanan hâli: **taze** (≤120 sn) ve RTT'si en düşüğün 2 katını aşmayan
+> örneklerin **offset medyanı**. Negatif RTT'li örnekler elenir — fiziksel
+> olarak imkânsızdırlar ve sunucunun t1 ile t2 arasında takıldığını gösterirler.
+> Medyan aykırı değere dayanıklı, düşük RTT filtresi jitter korumasını korur.
+>
+> Saati sürekli sıçrayan bir sunucuyu hiçbir istemci düzeltemez; bu altyapı
+> arızasıdır. Buradaki iş tek tük aykırı örneğe teslim olmamak.
 
 ### 4.3 Drift düzeltme — üç kademeli
 
@@ -409,12 +423,60 @@ telemetri tablosunda canlı görünüyor. ✅
 > **4. `p(99)` k6'nın varsayılan özetinde YOKTUR.** `summaryTrendStats`
 > açıkça verilmezse kırılma noktası aramanın tamamı görünmez.
 
-### Faz 5 — Sesli sohbet (WebRTC) · ⏸ BİLİNÇLİ OLARAK ERTELENDİ
+### Faz 5 — Sesli/görüntülü sohbet (WebRTC) · ✅ TAMAMLANDI
 
-Mesh P2P ≤5 katılımcıya kadar çalışır; ötesinde SFU gerekir ve bu ayrı bir
-projedir. Mevcut kapsamı derinleştirmek, yeni bir yarım özellik eklemekten
-daha değerli görüldü. Analiz ve mimari kararlar bu belgede duruyor (bkz.
-P2P bölümü); uygulanmadı ve README'de eksik olarak işaretlendi.
+Mesh P2P, `MAX_MEDIA_PEERS = 6`. Sinyalleşme mevcut WebSocket kanalından gidiyor;
+sunucu SDP içeriğine bakmıyor, yalnızca taşıyor ve **gönderen kimliğini kendisi
+yazıyor** ki kimse başkası adına sinyal gönderemesin. Ekran paylaşımı
+`getDisplayMedia` ile aynı mesh üzerinden.
+
+Öğrenilenler (planda yoktu):
+
+- **Sabit teklif eden taraf kilitleniyor.** İlk sürümde yalnızca kimliği küçük
+  olan taraf teklif ediyordu; medyayı açan taraf büyük kimlikliyse teklif
+  edemiyor, karşı taraf da gönderecek akışı olmadığı için boş teklif üretiyordu.
+  Çözüm *perfect negotiation*: çakışmada kibar taraf kendi teklifini geri alır.
+- **`e.streams[0]`'a güvenilmez.** `ontrack` her track için ayrı ateşlenir.
+  Mikrofon açılıp sonra kamera açılınca yeniden pazarlık oluyor ve son olay
+  yalnızca sesi taşıyan bir akışla geliyordu: bağlantı kusursuz çalışıyor,
+  kareler çözülüyor ama gösterdiğimiz akışın içinde video yok. Eş başına kendi
+  `MediaStream`'imizi tutup track'leri ona ekliyoruz.
+- **`removeTrack` + `addTrack` yerine `replaceTrack`.** Her akış değişiminde
+  göndericileri söküp takmak yeni transceiver ve tam yeniden pazarlık demek.
+  Tür başına tek gönderici tutup track'i yerinde takas etmek hem yeniden
+  pazarlığı hem glare riskini kaldırıyor.
+- **`innerHTML` ile karo çizmek akışı sıfırlıyor.** Her render oynayan video
+  elemanlarını yok edip yeniden yaratıyordu. Karolar artık yerinde güncelleniyor.
+
+Eksik: TURN yok (yalnızca genel STUN), 6 kişiden sonrası SFU işi.
+
+### Faz 6 — Ortak tarayıcı · ✅ TAMAMLANDI
+
+Oda başına sunucuda bir Chromium sekmesi. Görüntü CDP `Page.startScreencast`
+akışından JPEG kare olarak iniyor, fare/klavye olayları `Input.dispatch*` ile
+geri basılıyor. Ayrı servis (`:8094`) ve ayrı imaj: Chromium ~400 MB ve bir
+odanın tarayıcı yükü senkron motorunu etkilememeli.
+
+Neden WebRTC değil: sunucudan WebRTC yayını için medya sunucusu (Pion/GStreamer)
+gerekirdi. Screencast saf Node ile çalışıyor ve mevcut WebSocket altyapısına
+oturuyor. Bedeli **ses yok** ve kare hızı sınırlı.
+
+Öğrenilenler (planda yoktu):
+
+- **Dinleyiciyi doğrulamadan sonra bağlamak mesaj kaybettiriyor.** İstemci
+  `open` anında `BROWSER_START` yolluyor, sunucu o sırada Redis'ten bileti
+  tüketiyordu; mesaj dinleyicisiz gelip sessizce düşüyordu. Sayfa hiç açılmadı,
+  tek bir hata da düşmedi. Artık dinleyici en başta bağlanıp doğrulama bitene
+  kadar sınırlı bir tampona alıyor.
+- **Screencast yalnızca ekran DEĞİŞTİĞİNDE kare üretir.** Durgun sayfada hiç
+  kare gelmiyor; sonradan katılan bomboş ekrana bakıyordu. Son kare saklanıp
+  girişte hemen yollanıyor.
+- **Bant genişliği asıl kısıt.** 1280x720 q55'te kare başına ~97 KB ölçtük;
+  15 fps'te izleyici başına 1,4 MB/sn. Yayını 960x540 q45'e almak bunu ~51 KB'a
+  indirdi, okunabilirliği ciddi bozmadan.
+
+Eksik: ses yok, yatay ölçeklenmiyor (slug'a göre yapışkan yönlendirme gerekir),
+varsayılan tavan 4 eşzamanlı oda.
 
 <details>
 <summary>Faz 4 orijinal planı (referans)</summary>
@@ -434,9 +496,9 @@ X'ti, Y ile 3.000'e taşıdım" cümlesi. CV'nizin en güçlü satırı bu olaca
 
 </details>
 
-### Faz 5 planı (uygulanmadı — referans)
-- [ ] Sinyalleşme (mevcut WS kanalı üzerinden)
-- [ ] Mesh P2P, **≤5 katılımcı** sınırı
+### Faz 5 orijinal planı — nesi yapıldı
+- [x] Sinyalleşme (mevcut WS kanalı üzerinden)
+- [x] Mesh P2P — sınır 5 değil **6** katılımcı
 - [ ] coturn TURN sunucusu (docker) — oturumların %25-30'u buna düşecek
 - [ ] Film sesini konuşma sırasında kısma (ducking)
 - [ ] 6. kişi katılınca SFU'ya düşme (çok daha büyük iş)
