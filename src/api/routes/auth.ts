@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { queryOne, isUniqueViolation } from '../../shared/db.ts';
 import { hashPassword, verifyPassword, fakeVerify } from '../../shared/password.ts';
 import { signAccessToken } from '../../shared/jwt.ts';
+import { issueRefreshToken, rotateRefreshToken, revokeFamilyOf } from '../../shared/refresh.ts';
 import { config } from '../../shared/config.ts';
 import { badRequest, conflict, unauthorized, notFound } from '../../shared/errors.ts';
 import { requireAuth, currentUser } from '../middleware/auth.ts';
@@ -30,6 +31,12 @@ const RegisterSchema = z.object({
 const LoginSchema = z.object({
   email: z.string().trim().toLowerCase().max(254),
   password: z.string().min(1).max(200),
+});
+
+// Jeton 32 baytın base64url'ü = 43 karakter. Üst sınır, gövdeyi şişirip
+// boşuna SHA-256 hesaplatmayı engelliyor.
+const RefreshSchema = z.object({
+  refreshToken: z.string().min(20).max(200),
 });
 
 function parseBody<S extends z.ZodTypeAny>(schema: S, body: unknown): z.infer<S> {
@@ -88,12 +95,16 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       displayName: row.display_name,
     });
 
+    const refresh = await issueRefreshToken(row.id);
+
     req.log.info({ userId: row.id }, 'Yeni kullanıcı kaydı');
 
     return reply.status(201).send({
       user: toPublicUser(row),
       accessToken,
       expiresIn: config.ACCESS_TOKEN_TTL,
+      refreshToken: refresh.token,
+      refreshExpiresIn: refresh.expiresInSeconds,
     });
   });
 
@@ -128,13 +139,70 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       displayName: row.display_name,
     });
 
+    const refresh = await issueRefreshToken(row.id);
+
     req.log.info({ userId: row.id }, 'Giriş başarılı');
 
     return reply.send({
       user: toPublicUser(row),
       accessToken,
       expiresIn: config.ACCESS_TOKEN_TTL,
+      refreshToken: refresh.token,
+      refreshExpiresIn: refresh.expiresInSeconds,
     });
+  });
+
+  // --------------------------------------------------------------- refresh
+  //
+  // Erişim jetonu İSTEMİYOR — zaten süresi dolduğu için buraya geliniyor.
+  app.post('/refresh', async (req, reply) => {
+    const { refreshToken } = parseBody(RefreshSchema, req.body);
+
+    const result = await rotateRefreshToken(refreshToken);
+    if (!result.ok) {
+      if (result.reason === 'reused') {
+        // Kullanılmış jetonun ikinci kez sunulması: ortada iki kopya var,
+        // biri çalıntı. Aile iptal edildi; istemciye de bunu söylüyoruz ki
+        // sessizce yeniden denemesin.
+        req.log.warn('Kullanılmış yenileme jetonu sunuldu; aile iptal edildi');
+        throw unauthorized('Oturum güvenlik nedeniyle sonlandırıldı, yeniden giriş yapın');
+      }
+      throw unauthorized('Yenileme jetonu geçersiz veya süresi dolmuş');
+    }
+
+    // Kullanıcı silinmiş ya da adını değiştirmiş olabilir; iddiaları
+    // veritabanından tazeliyoruz.
+    const row = await queryOne<UserRow>(
+      `SELECT id, email, display_name, password_hash, created_at
+         FROM users WHERE id = $1`,
+      [result.userId],
+    );
+    if (!row) throw unauthorized('Kullanıcı bulunamadı');
+
+    const accessToken = await signAccessToken({
+      sub: row.id,
+      email: row.email,
+      displayName: row.display_name,
+    });
+
+    return reply.send({
+      user: toPublicUser(row),
+      accessToken,
+      expiresIn: config.ACCESS_TOKEN_TTL,
+      refreshToken: result.token,
+      refreshExpiresIn: result.expiresInSeconds,
+    });
+  });
+
+  // ---------------------------------------------------------------- logout
+  //
+  // Jetonu değil AİLEYİ kapatıyoruz: elde kalan eski bir halkanın oturumu
+  // sürdürebilmesi çıkışı anlamsız kılardı. Bilinmeyen jetona da 204 dönüyoruz;
+  // "bu jeton var mıydı" bilgisini sızdırmanın gereği yok.
+  app.post('/logout', async (req, reply) => {
+    const { refreshToken } = parseBody(RefreshSchema, req.body);
+    await revokeFamilyOf(refreshToken);
+    return reply.status(204).send();
   });
 
   // -------------------------------------------------------------------- me

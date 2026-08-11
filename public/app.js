@@ -48,8 +48,120 @@ let nudgeActive = false;
 
 const progressWatchers = new Map();
 
+// ──────────────────────────────────────────────────────── Oturum yenileme
+/**
+ * Erişim jetonu 15 dakikalık. Film iki saat.
+ *
+ * Önceden yenileme yoktu: süre dolunca bir sonraki istek "Oturum süresi doldu"
+ * alıyor, bağlantı koptuğunda yeniden bilet alınamıyor ve kullanıcı odadan
+ * düşüyordu. Artık uzun ömürlü ve iptal edilebilir bir yenileme jetonu var.
+ */
+let refreshToken = localStorage.getItem('refreshToken') || '';
+let refreshInFlight = null;
+let refreshTimer = null;
+
+function saveSession(result) {
+  token = result.accessToken;
+  if (result.refreshToken) refreshToken = result.refreshToken;
+  localStorage.setItem('token', token);
+  localStorage.setItem('refreshToken', refreshToken);
+  scheduleRefresh(result.expiresIn);
+}
+
+function clearSession() {
+  token = '';
+  refreshToken = '';
+  me = null;
+  localStorage.removeItem('token');
+  localStorage.removeItem('refreshToken');
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = null;
+}
+
+/**
+ * Süre dolmadan önce yenile.
+ *
+ * 401'i beklemek, o an yapılan işi (bilet alma, oda açma) bir tur geciktirir;
+ * kötü zamanda denk gelirse yeniden bağlanma gecikir.
+ */
+function scheduleRefresh(expiresIn) {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = null;
+  if (!expiresIn || !refreshToken) return;
+  refreshTimer = setTimeout(() => void refreshSession(), Math.max(30_000, (expiresIn - 60) * 1000));
+}
+
+async function postRefresh() {
+  const res = await fetch(`${API}/api/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  }).catch(() => null);
+
+  // Ağ hatası oturumu SİLMEZ: internet bir saniye gidip geldiğinde kullanıcıyı
+  // çıkışa atmanın anlamı yok, bir sonraki denemede yenilenir.
+  if (!res) return false;
+  if (!res.ok) {
+    clearSession();
+    return false;
+  }
+  const json = await res.json().catch(() => null);
+  if (!json?.accessToken) return false;
+  me = json.user ?? me;
+  saveSession(json);
+  return true;
+}
+
+/**
+ * Yenileme jetonu TEK KULLANIMLIK ve sunucu ikinci kullanımı çalıntı sayıp
+ * bütün oturumu kapatıyor. İki yarış kaynağı var ve ikisi de kapatılmalı:
+ *
+ * 1. Aynı sekmede aynı anda 401 alan iki istek — uçuştaki sözü paylaşıyoruz.
+ * 2. İki SEKME aynı anda yeniliyor — localStorage ortak, ikisi de aynı jetonu
+ *    sunar ve kullanıcı kendi kendini çıkışa atardı. Web Locks ile sıraya
+ *    giriyoruz; kilidi bekleyen sekme, uyanınca diğerinin yazdığı taze jetonu
+ *    devralıyor.
+ */
+function refreshSession() {
+  if (refreshInFlight) return refreshInFlight;
+  if (!refreshToken) return Promise.resolve(false);
+
+  const run = async () => {
+    const stored = localStorage.getItem('refreshToken') || '';
+    if (stored && stored !== refreshToken) {
+      // Başka sekme bizden önce yenilemiş; onun sonucunu kullan.
+      refreshToken = stored;
+      token = localStorage.getItem('token') || '';
+      return Boolean(token);
+    }
+    return postRefresh();
+  };
+
+  refreshInFlight = (navigator.locks
+    ? navigator.locks.request('watchparty-auth-refresh', run)
+    : run()
+  ).catch(() => false).finally(() => { refreshInFlight = null; });
+
+  return refreshInFlight;
+}
+
+/**
+ * Oturum kancası — teşhis ve test için.
+ *
+ * Yenilemeyi dışarıdan tetikleyebilmek şart: iki sekmenin yarışını gerçekten
+ * üretmenin başka yolu yok. Testin ilk sürümü iki sekmeyi yeniden yükleyip
+ * "aynı ana denk gelir" diye umuyordu; gelmiyordu ve test kilit kapalıyken de
+ * geçiyordu. `current()` de önkoşulu doğrulamak için: yarış ancak iki sekme
+ * bellekte AYNI jetonu tutuyorsa oluşur.
+ */
+globalThis.__auth = {
+  refresh: () => refreshSession(),
+  hasSession: () => Boolean(localStorage.getItem('refreshToken')),
+  current: () => refreshToken,
+};
+
 // ──────────────────────────────────────────────────────────── Yardımcılar
-async function api(method, path, body) {
+async function api(method, path, body, allowRetry = true) {
   const res = await fetch(API + path, {
     method,
     headers: {
@@ -58,6 +170,14 @@ async function api(method, path, body) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+
+  // Süresi dolmuş jeton kullanıcıya hata olarak GÖSTERİLMEZ: bir kez yenileyip
+  // aynı isteği tekrarlıyoruz. Tek deneme — yenileme de 401 verirse oturum
+  // gerçekten bitmiştir ve döngüye girmemek gerekir.
+  if (res.status === 401 && allowRetry && refreshToken) {
+    if (await refreshSession()) return api(method, path, body, false);
+  }
+
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json?.error?.message || `HTTP ${res.status}`);
   return json;
@@ -298,9 +418,8 @@ $('btn-random').onclick = () => {
 };
 
 function afterAuth(result) {
-  token = result.accessToken;
   me = result.user;
-  localStorage.setItem('token', token);
+  saveSession(result);
   setStatus('auth-status', `Hoş geldin, ${me.displayName}`, 'ok');
   enterHome();
 }
@@ -333,9 +452,19 @@ $('btn-login').onclick = async () => {
 };
 
 $('btn-logout').onclick = () => {
-  localStorage.removeItem('token');
-  token = ''; me = null;
+  // Sunucuda AİLEYİ kapat: yalnızca yereli silmek, elde kalan bir kopyanın
+  // oturumu sürdürebileceği anlamına gelirdi. Ekranı yanıtı beklemeden
+  // değiştiriyoruz — çıkış, ağın çalışmasına bağlı olmamalı.
+  const rt = refreshToken;
+  clearSession();
   showScreen('auth');
+  if (rt) {
+    void fetch(`${API}/api/auth/logout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: rt }),
+    }).catch(() => {});
+  }
 };
 
 // ═══════════════════════════════════════════════════════════ Kaynak seçimi
@@ -1308,8 +1437,16 @@ async function useVideoInRoom(videoId) {
 const urlRoom = new URLSearchParams(location.search).get('room');
 if (urlRoom) $('room-slug').value = urlRoom;
 
-if (token) {
+// Erişim jetonu yokken de deniyoruz: yenileme jetonu duruyorsa `api()` 401'i
+// görüp sessizce tazeler ve kullanıcı hiç giriş ekranı görmez.
+if (token || refreshToken) {
   api('GET', '/api/auth/me')
-    .then(({ user }) => { me = user; enterHome(); })
-    .catch(() => { token = ''; localStorage.removeItem('token'); });
+    .then(({ user }) => {
+      me = user;
+      enterHome();
+      // /me süre bilgisi döndürmüyor; sayacı kurmak için bir kez tazeliyoruz.
+      // Sayfa açıkken jeton sessizce yenilensin, 401'e hiç düşmeyelim.
+      if (refreshToken && !refreshTimer) void refreshSession();
+    })
+    .catch(() => clearSession());
 }

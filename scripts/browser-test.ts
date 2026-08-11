@@ -1068,6 +1068,104 @@ try {
     return 'listelendi ve karttan girildi';
   });
 
+  /**
+   * Erişim jetonu 15 dakikalık; film iki saat. Yenileme akışı eklenmeden önce
+   * süre dolduğunda bir sonraki istek "Oturum süresi doldu" alıyor, bağlantı
+   * koptuğunda yeniden bilet alınamıyor ve kullanıcı odadan düşüyordu.
+   */
+  await check('Erişim jetonu ölünce oturum kendiliğinden tazeleniyor', async () => {
+    const page = await pageA.browser().newPage();
+    try {
+      await setupUser(page, APP);
+      const once = await page.evaluate(() => localStorage.getItem('refreshToken'));
+      assert(once, 'yenileme jetonu saklanmamış');
+
+      // Erişim jetonunu geçersiz kıl: açılışta /me 401 alacak.
+      await page.evaluate(() => localStorage.setItem('token', 'bozuk.jeton.degeri'));
+      await page.reload({ waitUntil: 'domcontentloaded' });
+
+      const evde = await page.waitForFunction(
+        () => document.getElementById('screen-home')?.classList.contains('is-hidden') === false,
+        { timeout: 20_000, polling: 250 },
+      ).then(() => true).catch(() => false);
+      assert(evde, 'giriş ekranına düştü — jeton sessizce tazelenmedi');
+
+      const sonra = await page.evaluate(() => localStorage.getItem('refreshToken'));
+      assert(sonra && sonra !== once, 'yenileme jetonu döndürülmedi');
+      return 'bozuk jetonla açıldı, kullanıcı hiç fark etmedi';
+    } finally {
+      await page.close().catch(() => {});
+    }
+  });
+
+  /**
+   * Dönen jetonun sinsi tuzağı: localStorage sekmeler arasında ORTAK.
+   *
+   * İki sekme aynı anda yenilerse ikisi de aynı jetonu sunar, sunucu ikincisini
+   * çalıntı sayar ve aileyi iptal eder — kullanıcı kendi kendini çıkışa atar.
+   * Bu proje zaten iki sekmeyle kullanılıyor (davet linki), yani kenar durum
+   * değil olağan akış. Web Locks ile sıraya giriyoruz.
+   */
+  await check('İki sekme aynı anda tazelerse oturum düşmüyor', async () => {
+    const t1 = await pageA.browser().newPage();
+    const t2 = await pageA.browser().newPage();
+    try {
+      await setupUser(t1, APP);
+      // Aynı profil, aynı origin → aynı localStorage, aynı oturum.
+      await t2.goto(APP, { waitUntil: 'domcontentloaded' });
+      await t2.waitForFunction(
+        () => document.getElementById('screen-home')?.classList.contains('is-hidden') === false,
+        { timeout: 20_000, polling: 250 },
+      );
+
+      /**
+       * ÖNKOŞUL: iki sekme de bellekte AYNI jetonu tutmalı.
+       *
+       * t2 açılışta jetonu döndürüyor; t1'in belleğindeki kopya bayatlıyor ve
+       * t1 yenilemeye çalışınca ağa hiç çıkmadan diğerinin sonucunu devralıyor.
+       * O hâlde yarış oluşmuyordu — testin ilk iki sürümü kilit kapalıyken de
+       * geçiyordu, yani hiçbir şey ölçmüyordu. Önce hizalıyoruz.
+       */
+      await t1.evaluate(() => (globalThis as any).__auth.refresh());
+      const [x1, x2] = await Promise.all([
+        t1.evaluate(() => (globalThis as any).__auth.current()),
+        t2.evaluate(() => (globalThis as any).__auth.current()),
+      ]);
+      assert(x1 && x1 === x2, `önkoşul tutmadı, sekmeler farklı jeton tutuyor: ${x1} / ${x2}`);
+
+      // Şimdi ikisi de aynı jetonu sunmak üzere aynı anda koşuyor.
+      const [r1, r2] = await Promise.all([
+        t1.evaluate(() => (globalThis as any).__auth.refresh()),
+        t2.evaluate(() => (globalThis as any).__auth.refresh()),
+      ]);
+      assert(r1 === true && r2 === true, `yenileme başarısız: t1=${r1} t2=${r2}`);
+
+      // Asıl sinyal BU. Aile iptal edilse bile eldeki erişim jetonu 15 dakika
+      // daha geçerli kalır — `/api/auth/me` sorup "ayakta" demek yanıltıcıydı.
+      // Oturumun sağlığı, yenileme jetonunun HÂLÂ ÇALIŞMASIDIR.
+      const ayakta = await Promise.all([
+        t1.evaluate(() => (globalThis as any).__auth.hasSession()),
+        t2.evaluate(() => (globalThis as any).__auth.hasSession()),
+      ]);
+      assert(ayakta[0] && ayakta[1], `sekmeler oturumu sildi: ${JSON.stringify(ayakta)}`);
+
+      const sonrakiTur = await t1.evaluate(async () => {
+        const rt = localStorage.getItem('refreshToken');
+        const r = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken: rt }),
+        });
+        return r.status;
+      });
+      assert(sonrakiTur === 200, `aile iptal edilmiş, sonraki yenileme ${sonrakiTur}`);
+      return 'ikisi de ayakta, aile sağlam';
+    } finally {
+      await t1.close().catch(() => {});
+      await t2.close().catch(() => {});
+    }
+  });
+
   await check('Sayfada JavaScript hatası yok', async () => {
     // YouTube iframe'inin kendi hataları filtrelendi; kalanlar bizim kodumuz.
     const ours = consoleErrors.filter(
