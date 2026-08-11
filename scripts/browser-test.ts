@@ -1151,9 +1151,28 @@ try {
         );
       }
 
-      // Asıl sinyal BU. Aile iptal edilse bile eldeki erişim jetonu 15 dakika
-      // daha geçerli kalır — `/api/auth/me` sorup "ayakta" demek yanıltıcıydı.
-      // Oturumun sağlığı, yenileme jetonunun HÂLÂ ÇALIŞMASIDIR.
+      /**
+       * Kilit işini yaptıysa ağa YALNIZCA BİRİ çıkar; ikincisi kilidi
+       * bekleyip diğerinin yazdığı jetonu devralır.
+       *
+       * Bunu ölçmek şart oldu: sunucu tarafına yarış toleransı eklendikten
+       * sonra kilit çalışmasa bile kullanıcı düşmüyor, yani "oturum ayakta"
+       * demek artık kilidi sınamıyor. İki tarafın da ağa çıkması, kilidin
+       * sıraya sokmadığı anlamına gelir.
+       */
+      const yollar = await Promise.all([
+        t1.evaluate(() => (globalThis as any).__auth.last()?.yol),
+        t2.evaluate(() => (globalThis as any).__auth.last()?.yol),
+      ]);
+      const postSayisi = yollar.filter((y) => y === 'post').length;
+      assert(
+        postSayisi === 1,
+        `kilit sıraya sokmadı — ${postSayisi} sekme birden ağa çıktı: ${JSON.stringify(yollar)}`,
+      );
+
+      // Aile iptal edilse bile eldeki erişim jetonu 15 dakika daha geçerli
+      // kalır — `/api/auth/me` sorup "ayakta" demek yanıltıcıydı. Oturumun
+      // sağlığı, yenileme jetonunun HÂLÂ ÇALIŞMASIDIR.
       const ayakta = await Promise.all([
         t1.evaluate(() => (globalThis as any).__auth.hasSession()),
         t2.evaluate(() => (globalThis as any).__auth.hasSession()),

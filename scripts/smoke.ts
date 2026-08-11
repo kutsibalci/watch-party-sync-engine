@@ -75,6 +75,9 @@ const password = 'CokGizliParola123';
 let token = '';
 let refreshToken = '';
 
+/** Sunucudaki REFRESH_REUSE_LEEWAY_MS ile aynı olmalı; testin beklediği süre. */
+const REUSE_LEEWAY_MS = Number(process.env.REFRESH_REUSE_LEEWAY_MS ?? 5000);
+
 await check('GET /healthz → 200', async () => {
   const { status, json } = await req('GET', '/healthz');
   assert(status === 200, `beklenen 200, gelen ${status}`);
@@ -210,19 +213,44 @@ await check('POST /api/auth/refresh (bilinmeyen jeton) → 401', async () => {
 });
 
 /**
- * Kullanılmış bir jetonun ikinci kez sunulması ortada iki kopya olduğunu
- * gösterir — biri çalıntı. Hangisi olduğu bilinemeyeceği için AİLE komple
- * iptal edilir. Bedeli meşru kullanıcının yeniden giriş yapması; alternatifi
- * saldırganın oturumu süresiz sürdürmesi.
+ * Saniyeler içinde gelen ikinci kullanım çalıntı DEĞİL, yarıştır: iki sekme
+ * ya da tekrarlanan bir ağ isteği. Kullanıcıyı bunun için çıkışa atmak,
+ * çözmek istediğimiz sorunu geri getirirdi.
  */
-await check('Kullanılmış yenileme jetonu tekrar sunulunca aile iptal ediliyor', async () => {
-  // Taze bir aile kur; testin kalanını etkilemesin.
+await check('Yarış penceresinde ikinci kullanım oturumu düşürmüyor', async () => {
+  const giris = await req('POST', '/api/auth/login', { body: { email, password } });
+  const ilk = giris.json.refreshToken as string;
+
+  const a = await req('POST', '/api/auth/refresh', { body: { refreshToken: ilk } });
+  assert(a.status === 200, `döndürme başarısız: ${a.status}`);
+
+  // Kaybeden sekme aynı jetonu hemen ardından sunuyor.
+  const b = await req('POST', '/api/auth/refresh', { body: { refreshToken: ilk } });
+  assert(b.status === 200, `yarış çalıntı sayıldı: ${b.status}`);
+  assert(b.json.refreshToken !== a.json.refreshToken, 'iki tarafa aynı jeton verildi');
+
+  // Kazananın jetonu da yaşamaya devam etmeli — aile kapanmamış olmalı.
+  const kazanan = await req('POST', '/api/auth/refresh', { body: { refreshToken: a.json.refreshToken } });
+  assert(kazanan.status === 200, `aile kapanmış: ${kazanan.status}`);
+  return 'ikisi de geçerli jetonla devam etti';
+});
+
+/**
+ * Tolerans penceresi geçtikten SONRA aynı jetonun sunulması artık yarışla
+ * açıklanamaz: ortada saklanmış bir kopya var. AİLE komple iptal edilir.
+ *
+ * Bu test bilerek bekliyor. Pencereyi test için sıfırlamak, üretimdeki
+ * davranıştan başka bir şeyi doğrulamak olurdu.
+ */
+await check('Pencere geçtikten sonra yeniden kullanım aileyi iptal ediyor', async () => {
   const giris = await req('POST', '/api/auth/login', { body: { email, password } });
   const ilk = giris.json.refreshToken as string;
 
   const donus = await req('POST', '/api/auth/refresh', { body: { refreshToken: ilk } });
   assert(donus.status === 200, `döndürme başarısız: ${donus.status}`);
   const ikinci = donus.json.refreshToken as string;
+
+  await new Promise((r) => setTimeout(r, REUSE_LEEWAY_MS + 800));
 
   // Çalıntı kopya: ilk jeton yeniden sunuluyor.
   const tekrar = await req('POST', '/api/auth/refresh', { body: { refreshToken: ilk } });

@@ -10,11 +10,17 @@
  * bilemeyiz, o yüzden AİLENİN tamamını iptal ediyoruz. Bedeli, meşru
  * kullanıcının da yeniden giriş yapması; alternatifi, saldırganın oturumu
  * süresiz sürdürmesi.
+ *
+ * Tek istisna kısa bir tolerans penceresi (REFRESH_REUSE_LEEWAY_MS): saniyeler
+ * içinde gelen ikinci kullanım pratikte hep iki sekmenin ya da bir ağ
+ * tekrarının aynı jetonu göndermesidir, çalıntı değildir. O pencerede aile
+ * kapatılmaz. Gerekçesi ölçülmüş bir olay: istemci yarışı Web Locks ile
+ * sıraya sokmasına rağmen CI koşumlarının birinde yarış sızdı.
  */
 import { randomBytes, createHash } from 'node:crypto';
 
 import { query, queryOne } from './db.ts';
-import { config } from './config.ts';
+import { config as cfg } from './config.ts';
 
 /** 32 bayt = 256 bit entropi; tahmin edilemez. */
 const TOKEN_BYTES = 32;
@@ -43,7 +49,7 @@ export async function issueRefreshToken(
   familyId?: string,
 ): Promise<IssuedRefresh> {
   const token = randomBytes(TOKEN_BYTES).toString('base64url');
-  const ttl = config.REFRESH_TOKEN_TTL;
+  const ttl = cfg.REFRESH_TOKEN_TTL;
 
   await query(
     `INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at)
@@ -63,7 +69,7 @@ export async function issueRefreshToken(
 }
 
 export type RotateResult =
-  | { ok: true; userId: string; token: string; expiresInSeconds: number }
+  | { ok: true; userId: string; token: string; expiresInSeconds: number; leeway?: boolean }
   | { ok: false; reason: 'invalid' | 'reused' };
 
 /**
@@ -94,13 +100,29 @@ export async function rotateRefreshToken(token: string): Promise<RotateResult> {
 
   // Alınamadı: ya hiç yok, ya süresi geçmiş, ya iptal edilmiş — ya da ZATEN
   // KULLANILMIŞ. Sonuncusu diğerlerinden farklı bir olay.
-  const existing = await queryOne<TokenRow>(
-    `SELECT id, user_id, family_id, replaced_at, revoked_at, expires_at
+  const existing = await queryOne<TokenRow & { since_ms: number }>(
+    `SELECT id, user_id, family_id, replaced_at, revoked_at, expires_at,
+            EXTRACT(EPOCH FROM (now() - replaced_at)) * 1000 AS since_ms
        FROM refresh_tokens WHERE token_hash = $1`,
     [hash],
   );
 
-  if (existing && existing.replaced_at && !existing.revoked_at) {
+  if (existing && existing.replaced_at && !existing.revoked_at && existing.expires_at > new Date()) {
+    /**
+     * Kısa aralıkla gelen ikinci kullanım çalıntı değil, YARIŞTIR.
+     *
+     * İki sekme aynı anda yeniliyor ya da ağ isteği tekrarlıyor. İstemci bunu
+     * Web Locks ile sıraya sokuyor ama garanti veremez; CI'da altı koşumun
+     * birinde yarış sızdı ve kullanıcı kendi kendini çıkışa attı. Bu pencere
+     * içinde aileyi kapatmıyor, kaybedene de geçerli bir jeton veriyoruz.
+     *
+     * Bedeli açık: bu saniyeler içinde çalıntı bir kopya da bir kez
+     * kullanılabilir. Karşılığında film ortasında kimse çıkışa düşmüyor.
+     */
+    if (existing.since_ms <= cfg.REFRESH_REUSE_LEEWAY_MS) {
+      const next = await issueRefreshToken(existing.user_id, existing.family_id);
+      return { ok: true, userId: existing.user_id, ...next, leeway: true };
+    }
     await revokeFamily(existing.family_id);
     return { ok: false, reason: 'reused' };
   }

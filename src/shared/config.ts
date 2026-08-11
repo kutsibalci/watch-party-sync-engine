@@ -42,6 +42,16 @@ const BaseSchema = z.object({
   JWT_ISSUER: z.string().min(1).default('birlikte-izleme'),
   ACCESS_TOKEN_TTL: z.coerce.number().int().positive().default(900),
   REFRESH_TOKEN_TTL: z.coerce.number().int().positive().default(2_592_000),
+  /**
+   * Yeniden kullanım toleransı.
+   *
+   * Döndürülmüş bir jeton bu süre içinde ikinci kez sunulursa çalıntı SAYILMAZ:
+   * neredeyse her zaman iki sekmenin ya da bir ağ tekrarının aynı jetonu
+   * göndermesidir. İstemci Web Locks ile sıraya giriyor ama bu garanti değil —
+   * garanti olmayan bir şeyin bedeli kullanıcının film ortasında çıkışa
+   * atılması olamaz. Süre dolduktan sonra tespit yine katı: aile iptal edilir.
+   */
+  REFRESH_REUSE_LEEWAY_MS: z.coerce.number().int().min(0).default(5_000),
 
   CORS_ORIGIN: z.string().min(1).default('http://localhost:5173'),
 

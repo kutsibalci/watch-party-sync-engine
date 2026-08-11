@@ -5,7 +5,7 @@
 [![CI](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/Node-24-3c873a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Test](https://img.shields.io/badge/test-103%20senaryo-3ecf8e)
+![Test](https://img.shields.io/badge/test-104%20senaryo-3ecf8e)
 
 Arkadaşlarınla aynı anda video izlemeyi sağlayan gerçek zamanlı senkron motoru:
 YouTube, kendi yüklediğin videolar, ekran paylaşımı ya da sunucuda açılan
@@ -20,7 +20,7 @@ yatay ölçeklenebilir WebSocket katmanı.
 > zamanlı sistemler, asenkron iş işleme ve yatay ölçeklemeyi **ölçülmüş
 > sonuçlarla** göstermek.
 
-**Durum:** Faz 0–6 tamamlandı · **103 otomatik test** (gerçek Chrome testi dahil) ·
+**Durum:** Faz 0–6 tamamlandı · **104 otomatik test** (gerçek Chrome testi dahil) ·
 tip kontrolü temiz · üretim imajı root olmayan kullanıcıyla çalışıyor
 
 <p align="center">
@@ -67,7 +67,7 @@ npm run infra:up      # postgres, redis, minio, prometheus, grafana
 npm run migrate
 npm run dev           # api + realtime + worker
 
-npm run smoke         # 20 test — her şey bağlandı mı?
+npm run smoke         # 21 test — her şey bağlandı mı?
 ```
 
 Tarayıcıda **http://127.0.0.1:8090/app/** →
@@ -204,14 +204,14 @@ anda claim ettiğini ve tam olarak 1'inin kazandığını** doğruluyor.
 
 ```bash
 npm run typecheck       # tsc, iki yapılandırma
-npm run smoke           # 20 · sağlık, auth, hata yolları, güvenlik davranışı
+npm run smoke           # 21 · sağlık, auth, hata yolları, güvenlik davranışı
 npm run sync-test       # 25 · senkron motoru, saat, versiyon, bilet, host devri
 npm run pipeline-test   # 14 · kuyruk mekanizmaları + gerçek ffmpeg transkodu
 npm run scale-test      # 12 · iki instance arası tutarlılık
 npm run browser-test    # 32 · gerçek Chrome, iki sekme (HEADLESS=0 ile izle)
 ```
 
-Toplam **103 senaryo**, hepsi CI'da da koşuyor.
+Toplam **104 senaryo**, hepsi CI'da da koşuyor.
 
 Testler yalnızca "çalışıyor mu"yu değil **güvenlik davranışını** da doğruluyor:
 parola özeti sızıyor mu, kullanıcı numaralandırma mesajları aynı mı, bilet
@@ -548,10 +548,13 @@ scripts/   migration aracı + beş test paketi
   tarayıcı ayrı portlarda; ikisi de biletle çalıştığı için çerez yalnızca API'yi
   kapsardı ve kazanç bu projede tasarımın kendisini gölgeleyecek kadar küçüktü.
   Karşılığında jeton **dönüyor**, özeti saklanıyor ve iptal edilebiliyor.
-- Yeniden kullanım tespiti **meşru kullanıcıyı da çıkışa atabilir**: aynı jeton
-  iki kez sunulursa hangi kopyanın çalıntı olduğu bilinemez, aile komple
-  kapanır. Ağın bir isteği tekrarlaması bu duruma yol açar. İstemci bu yüzden
-  yenilemeyi hem sekme içinde hem sekmeler arasında sıraya sokuyor (Web Locks).
+- Yeniden kullanım tespitinin **beş saniyelik bir tolerans penceresi** var.
+  İstemci yenilemeyi hem sekme içinde hem sekmeler arasında sıraya sokuyor
+  (Web Locks) ama bu garanti değil: CI koşumlarının birinde yarış sızdı ve
+  kullanıcı kendi kendini çıkışa attı. O pencerede ikinci kullanım çalıntı
+  sayılmıyor. Bedeli açık — çalıntı bir kopya o saniyeler içinde bir kez
+  kullanılabilir; karşılığında film ortasında kimse düşmüyor. Pencere
+  dolduktan sonra tespit yine katı: aile komple iptal edilir.
 - Yük testi k6 tek konteynerde 2.500 VU'dan sonra kendi darboğazına giriyor —
   daha yükseği için birden fazla üreteç gerekir.
 
