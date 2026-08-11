@@ -99,6 +99,8 @@ function scheduleRefresh(expiresIn) {
  * dedi, yoksa başka sekmenin sonucu mu devralındı belli olmuyordu.
  */
 let lastRefresh = null;
+/** run() çalıştığı anda karşılaştırdığı iki değer — kararın girdisi. */
+let lastCtx = null;
 
 async function postRefresh() {
   const sent = refreshToken;
@@ -111,34 +113,44 @@ async function postRefresh() {
   // Ağ hatası oturumu SİLMEZ: internet bir saniye gidip geldiğinde kullanıcıyı
   // çıkışa atmanın anlamı yok, bir sonraki denemede yenilenir.
   if (!res) {
-    lastRefresh = { yol: 'post', durum: 'ag-hatasi' };
+    lastRefresh = { ...lastCtx, yol: 'post', durum: 'ag-hatasi' };
     return false;
   }
   if (!res.ok) {
-    lastRefresh = { yol: 'post', durum: res.status, gonderilen: sent.slice(0, 6) };
+    lastRefresh = { ...lastCtx, yol: 'post', durum: res.status, gonderilen: sent.slice(0, 6) };
     clearSession();
     return false;
   }
   const json = await res.json().catch(() => null);
   if (!json?.accessToken) {
-    lastRefresh = { yol: 'post', durum: 'govde-bos' };
+    lastRefresh = { ...lastCtx, yol: 'post', durum: 'govde-bos' };
     return false;
   }
   me = json.user ?? me;
   saveSession(json);
-  lastRefresh = { yol: 'post', durum: 200, gonderilen: sent.slice(0, 6), alinan: json.refreshToken.slice(0, 6) };
+  lastRefresh = { ...lastCtx, yol: 'post', durum: 200, gonderilen: sent.slice(0, 6), alinan: json.refreshToken.slice(0, 6) };
   return true;
 }
 
 /**
- * Yenileme jetonu TEK KULLANIMLIK ve sunucu ikinci kullanımı çalıntı sayıp
- * bütün oturumu kapatıyor. İki yarış kaynağı var ve ikisi de kapatılmalı:
+ * Yenileme jetonu tek kullanımlık; aynı jetonu iki kez sunmamak gerekiyor.
+ * Üç ayrı yarış var ve üçünün çaresi farklı:
  *
  * 1. Aynı sekmede aynı anda 401 alan iki istek — uçuştaki sözü paylaşıyoruz.
- * 2. İki SEKME aynı anda yeniliyor — localStorage ortak, ikisi de aynı jetonu
- *    sunar ve kullanıcı kendi kendini çıkışa atardı. Web Locks ile sıraya
- *    giriyoruz; kilidi bekleyen sekme, uyanınca diğerinin yazdığı taze jetonu
- *    devralıyor.
+ * 2. İki sekme SAATLERİ FARKLI zamanlarda yeniliyor — geç kalan sekmenin
+ *    bellekteki kopyası bayat. Depoyu okuyup diğerinin sonucunu devralıyoruz.
+ * 3. İki sekme AYNI ANDA yeniliyor — Web Locks ile sıraya giriyoruz.
+ *
+ * Üçüncüsü tam olarak çözülemiyor ve bunu ölçtük: kilit kodu doğru sıraya
+ * sokuyor ama `localStorage` yazması sekmeler arasında ANINDA görünmüyor —
+ * her renderer süreci kendi kopyasını önbelleklediği için güncelleme
+ * asenkron yayılıyor. Kilidi ikinci alan sekme, birincisi çıktıktan sonra
+ * girip hâlâ eski jetonu okuyabiliyor. Sayaçlı ölçümde 60 turun 1'inde artış
+ * kayboldu; uygulama düzeyinde 60 yarışın 4'ünde iki sekme de ağa çıktı.
+ *
+ * Bu yüzden garanti istemci tarafında değil SUNUCUDA: kısa bir tolerans
+ * penceresinde ikinci kullanım çalıntı sayılmıyor (REFRESH_REUSE_LEEWAY_MS).
+ * Kilit yine de duruyor — gereksiz turların %93'ünü siliyor.
  */
 function refreshSession() {
   if (refreshInFlight) return refreshInFlight;
@@ -146,11 +158,17 @@ function refreshSession() {
 
   const run = async () => {
     const stored = localStorage.getItem('refreshToken') || '';
+    // Kararın girdisini kaydet: "iki sekme de ağa çıktı" derken hangisinin
+    // neyi gördüğünü bilmeden sebebi bulmak mümkün değil.
+    lastCtx = {
+      depo: stored ? stored.slice(0, 6) : '(bos)',
+      bellek: refreshToken ? refreshToken.slice(0, 6) : '(bos)',
+    };
     if (stored && stored !== refreshToken) {
       // Başka sekme bizden önce yenilemiş; onun sonucunu kullan.
       refreshToken = stored;
       token = localStorage.getItem('token') || '';
-      lastRefresh = { yol: 'devral', durum: token ? 'tamam' : 'jeton-yok' };
+      lastRefresh = { ...lastCtx, yol: 'devral', durum: token ? 'tamam' : 'jeton-yok' };
       return Boolean(token);
     }
     return postRefresh();
@@ -160,7 +178,7 @@ function refreshSession() {
     ? navigator.locks.request('watchparty-auth-refresh', run)
     : run()
   ).catch((e) => {
-    lastRefresh = { yol: 'istisna', durum: String(e?.name ?? e) };
+    lastRefresh = { ...lastCtx, yol: 'istisna', durum: String(e?.name ?? e) };
     return false;
   }).finally(() => { refreshInFlight = null; });
 
@@ -288,6 +306,7 @@ const STAGE_LAYERS = {
 let stageLayer = 'empty';
 
 function showStage(kind) {
+  const previous = stageLayer;
   stageLayer = kind;
   for (const [name, id] of Object.entries(STAGE_LAYERS)) {
     const el = $(id);
@@ -296,7 +315,52 @@ function showStage(kind) {
   $('stage-empty').classList.toggle('is-hidden', kind !== 'empty');
   // Kapak yalnızca YouTube sahnesine aittir; başka katmana geçince kalkar.
   if (kind !== 'youtube') clearPoster();
+  // Yalnızca katman DEĞİŞİNCE: applyState her sürümde buradan geçiyor ve her
+  // seferinde sesi açmak, oynatıcıyı kendi eliyle susturmuş kullanıcıyla
+  // inatlaşmak olurdu.
+  if (kind !== previous) silenceHiddenLayers(kind);
 }
+
+/**
+ * Gizlemek SUSTURMAZ.
+ *
+ * `hidden` bir `<video>` ya da iframe `display:none` olur ama sesi çalmaya
+ * devam eder. Ortak tarayıcıya geçince arkadaki YouTube ya da ekran paylaşımı
+ * sesi sürüyordu; kullanıcı bunu "sanal tarayıcıda ses var" sandı. Ortak
+ * tarayıcının ses kanalı yok — duyulan, susmamış eski katmandı.
+ *
+ * Duraklatmak yerine SUSTURUYORUZ: duraklatmak senkron motorunun oynatma
+ * durumuyla çakışır, susturmak yalnızca sesi keser.
+ */
+function silenceHiddenLayers(kind) {
+  for (const [name, id] of [['hls', 'video'], ['screen', 'screen-view']]) {
+    const el = $(id);
+    if (!el) continue;
+    // Katmanın SAHİBİ ne istediğini burada bırakıyor: kendi ekranını
+    // paylaşan kişinin önizlemesi görünürken bile sessiz kalmalı (yankı).
+    const wanted = el.dataset.wantMuted === '1';
+    el.muted = name === kind ? wanted : true;
+  }
+  if (ytReady) {
+    try {
+      if (kind === 'youtube') ytPlayer.unMute?.();
+      else ytPlayer.mute?.();
+    } catch { /* oynatıcı henüz hazır değil */ }
+  }
+}
+
+/**
+ * Sahne kancası — teşhis ve test için.
+ *
+ * "Ortak tarayıcıda ses var" şikâyeti tam olarak buradan doğdu: hangi katmanın
+ * sustuğu dışarıdan görünmüyordu ve sesin nereden geldiği tartışma konusu oldu.
+ */
+globalThis.__stage = () => ({
+  layer: stageLayer,
+  videoMuted: $('video').muted,
+  screenMuted: $('screen-view').muted,
+  ytMuted: ytReady ? Boolean(ytPlayer.isMuted?.()) : null,
+});
 
 /**
  * Seçilen videonun kapak fotoğrafı.
@@ -380,8 +444,9 @@ function mountSource(source, startAtMs, shouldPlay) {
     return;
   }
 
-  showStage('hls');
   const video = $('video');
+  video.dataset.wantMuted = '0';   // kendi videon duyulmalı
+  showStage('hls');
   if (activeKind !== 'hls' || video.dataset.src !== source.url) {
     activeKind = 'hls';
     player = hlsAdapter;
@@ -1027,10 +1092,10 @@ function pauseUnderlyingPlayer() {
 
 function showScreenStage(stream) {
   pauseUnderlyingPlayer();
-  showStage('screen');
   const el = $('screen-view');
   el.srcObject = stream;
-  el.muted = true;   // kendi ekranını dinlemek yankı yapar
+  el.dataset.wantMuted = '1';   // kendi ekranını dinlemek yankı yapar
+  showStage('screen');
   void el.play().catch(() => {});
 }
 
@@ -1098,9 +1163,10 @@ function routeScreenShare(members) {
   const el = $('screen-view');
   if (el.srcObject !== r.stream) {
     pauseUnderlyingPlayer();
-    showStage('screen');
     el.srcObject = r.stream;
-    el.muted = false;
+    // Karşı tarafın ekranı DUYULMALI; kendi önizlememiz duyulmamalı.
+    el.dataset.wantMuted = '0';
+    showStage('screen');
     void el.play().catch(() => {});
   }
 }

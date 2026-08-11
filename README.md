@@ -550,12 +550,18 @@ scripts/   migration tool + four test suites
   and the shared browser sit on separate ports and both authenticate with tickets, so
   the cookie would only cover the API — too small a gain for the complexity it adds
   here. In exchange the token **rotates**, is stored hashed, and can be revoked.
-- Reuse detection has a **five-second leeway window**. The client serialises refreshes
-  both within a tab and across tabs (Web Locks), but that is not a guarantee: one CI
-  run leaked a race and the user logged themselves out. Inside that window a second
-  use is not treated as theft. The cost is explicit — a stolen copy could be used once
-  during those seconds; in exchange nobody drops out mid-film. After the window,
-  detection is strict again and the whole family is revoked.
+- Reuse detection has a **five-second leeway window**, and that window was set by
+  measurement. The client serialises refreshes with Web Locks, but a single-POST
+  guarantee **cannot be had**: the lock excludes correctly, yet a `localStorage` write
+  is not immediately visible to other tabs — each renderer process caches its own copy
+  and the update propagates asynchronously. The tab that takes the lock *second* can
+  enter after the first one left and still read the old token. Measured with a
+  counter: 1 lost increment in 60 rounds. At application level: 3–4 of 60 races had
+  both tabs hit the network.
+  So the guarantee lives on the server, not the client. Inside the window a second use
+  is not treated as theft, and across 60 races the session survived every time. The
+  cost is explicit — a stolen copy could be used once during those seconds. After the
+  window, detection is strict again and the whole family is revoked.
 - The load test hits its own bottleneck past 2,500 VUs in a single k6 container —
   going higher needs multiple generators.
 

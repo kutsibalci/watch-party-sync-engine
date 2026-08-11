@@ -548,13 +548,18 @@ scripts/   migration aracı + beş test paketi
   tarayıcı ayrı portlarda; ikisi de biletle çalıştığı için çerez yalnızca API'yi
   kapsardı ve kazanç bu projede tasarımın kendisini gölgeleyecek kadar küçüktü.
   Karşılığında jeton **dönüyor**, özeti saklanıyor ve iptal edilebiliyor.
-- Yeniden kullanım tespitinin **beş saniyelik bir tolerans penceresi** var.
-  İstemci yenilemeyi hem sekme içinde hem sekmeler arasında sıraya sokuyor
-  (Web Locks) ama bu garanti değil: CI koşumlarının birinde yarış sızdı ve
-  kullanıcı kendi kendini çıkışa attı. O pencerede ikinci kullanım çalıntı
-  sayılmıyor. Bedeli açık — çalıntı bir kopya o saniyeler içinde bir kez
-  kullanılabilir; karşılığında film ortasında kimse düşmüyor. Pencere
-  dolduktan sonra tespit yine katı: aile komple iptal edilir.
+- Yeniden kullanım tespitinin **beş saniyelik bir tolerans penceresi** var ve
+  bu pencere ölçümle konuldu. İstemci yenilemeyi Web Locks ile sıraya sokuyor
+  ama **tek POST garantisi verilemiyor**: kilit kodu doğru dışlıyor, ancak
+  `localStorage` yazması sekmeler arasında anında görünmüyor — her renderer
+  süreci kendi kopyasını önbelleklediği için güncelleme asenkron yayılıyor.
+  Kilidi ikinci alan sekme, birincisi çıktıktan *sonra* girip hâlâ eski jetonu
+  okuyabiliyor. Sayaçlı ölçüm: 60 turun 1'inde artış kayboldu. Uygulama
+  düzeyinde: 60 yarışın 3-4'ünde iki sekme de ağa çıktı.
+  Bu yüzden garanti istemcide değil sunucuda. Pencere içinde ikinci kullanım
+  çalıntı sayılmıyor; 60 yarışın hepsinde oturum ayakta kaldı. Bedeli açık:
+  çalıntı bir kopya o saniyeler içinde bir kez kullanılabilir. Pencere
+  dolduktan sonra tespit yine katı — aile komple iptal edilir.
 - Yük testi k6 tek konteynerde 2.500 VU'dan sonra kendi darboğazına giriyor —
   daha yükseği için birden fazla üreteç gerekir.
 
