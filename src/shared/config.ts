@@ -70,6 +70,30 @@ const BrowserSchema = z.object({
   BROWSER_IDLE_MS: z.coerce.number().int().positive().default(120_000),
   /** Aynı anda açık tutulabilecek oda sayısı — her biri bir Chrome sekmesi. */
   BROWSER_MAX_SESSIONS: z.coerce.number().int().positive().default(4),
+
+  /**
+   * Sunucudaki sayfanın render boyutu VE tele giden kare boyutu — ikisi aynı.
+   *
+   * Önceden sayfa 1280x720 render edilip 960x540 gönderiliyordu; istemci bunu
+   * geri büyütünce yazılar bulanıklaşıyordu ("pixel pixel"). Küçültmenin tek
+   * kazancı bant genişliğiydi ve bunu artık kare atlayarak hallediyoruz.
+   */
+  BROWSER_WIDTH: z.coerce.number().int().min(640).max(2560).default(1280),
+  BROWSER_HEIGHT: z.coerce.number().int().min(360).max(1440).default(720),
+  /** JPEG kalitesi (0-100). 45 metni okunmaz hâle getiriyordu. */
+  BROWSER_QUALITY: z.coerce.number().int().min(20).max(95).default(72),
+  /** Saniyedeki en fazla kare — hem ağı hem sunucu CPU'sunu frenler. */
+  BROWSER_MAX_FPS: z.coerce.number().int().min(5).max(60).default(30),
+
+  /**
+   * Bir izleyicinin soketinde biriken bayt bu tavanı geçerse o izleyiciye kare
+   * GÖNDERİLMEZ.
+   *
+   * Kare hızını sabit bir sayıyla sınırlamak yanlış tarafı optimize ediyordu:
+   * hızlı bağlantı gereksiz yere yavaşlıyor, yavaş bağlantı yine de tıkanıyordu.
+   * Geri basınç ölçüsü doğrudan gecikmenin kendisi — biriken kuyruk.
+   */
+  BROWSER_MAX_BUFFERED_BYTES: z.coerce.number().int().positive().default(768 * 1024),
 });
 
 export type Config = z.infer<typeof BaseSchema>;

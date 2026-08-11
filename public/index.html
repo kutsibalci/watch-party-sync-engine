@@ -244,14 +244,18 @@
     <div class="stage-col">
       <div class="linkbar">
         <div id="nav-buttons" class="nav-buttons is-hidden">
-          <button id="btn-bw-back" class="btn btn-quiet btn-icon" title="Geri">‹</button>
-          <button id="btn-bw-fwd" class="btn btn-quiet btn-icon" title="İleri">›</button>
-          <button id="btn-bw-reload" class="btn btn-quiet btn-icon" title="Yenile">⟳</button>
+          <button id="btn-bw-back" class="btn btn-quiet btn-icon" title="Geri" aria-label="Geri">←</button>
+          <button id="btn-bw-fwd" class="btn btn-quiet btn-icon" title="İleri" aria-label="İleri">→</button>
+          <button id="btn-bw-reload" class="btn btn-quiet btn-icon" title="Yenile" aria-label="Yenile">⟳</button>
         </div>
         <span id="linkbar-icon" class="linkbar-icon">▶</span>
         <input id="stage-url" type="text" spellcheck="false"
                placeholder="YouTube bağlantısını buraya yapıştır ve Enter'a bas" />
         <button id="btn-stage-url" class="btn btn-primary btn-sm">Oynat</button>
+        <div id="bw-tools" class="nav-buttons is-hidden">
+          <button id="btn-bw-full" class="btn btn-quiet btn-icon" title="Tam ekran" aria-label="Tam ekran">⛶</button>
+          <button id="btn-bw-close" class="btn btn-quiet btn-icon" title="Ortak tarayıcıyı kapat" aria-label="Ortak tarayıcıyı kapat">✕</button>
+        </div>
         <button id="btn-source" class="btn btn-quiet btn-sm">Diğer kaynaklar</button>
       </div>
       <div id="bw-progress" class="bw-progress is-hidden"><span></span></div>
@@ -265,6 +269,14 @@
         <div id="stage-empty" class="stage-empty">
           <span>🎬</span>
           <p>Henüz bir kaynak seçilmedi</p>
+        </div>
+
+        <!-- Link yapıştırıldığı anda hangi videonun geldiği görünsün: YouTube
+             oynatıcısı ağdan yüklenene kadar sahne bomboş kalıyordu ve link
+             gitti mi gitmedi mi anlaşılmıyordu. -->
+        <div id="stage-poster" class="stage-poster is-hidden">
+          <img id="stage-poster-img" alt="" />
+          <p id="stage-poster-note" class="stage-poster-note">Video yükleniyor…</p>
         </div>
       </div>
 

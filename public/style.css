@@ -259,6 +259,34 @@ input::placeholder { color: var(--text-faint); }
   overflow: hidden;
   box-shadow: var(--shadow);
 }
+
+/**
+ * Sahne pencereye SIĞAR; sayfa kaymaz.
+ *
+ * Sahne, sütun ne kadar genişse o kadar geniş olup 16:9'dan yüksekliğini
+ * alıyordu. 1500 piksellik sütunda bu 626 piksel eder ve sayfa 179 piksel
+ * taşardı: kullanıcı kaydırınca adres çubuğu ve geri/ileri düğmeleri ekranın
+ * dışında kalıyordu — "geri ileri tuşlarını da görelim" şikâyeti buydu.
+ *
+ * Yüksekliği pencereden hesaplayıp genişliği ona göre kısıyoruz. Oran korunur,
+ * sahne ortalanır, çubuklar hep görünür kalır.
+ */
+@media (min-width: 1001px) {
+  .stage-col > .stage {
+    /*
+     * Sahne dışındaki her şey: üst çubuk 61 + dolgu 18/24 + linkbar 54 +
+     * kontroller 70 + medya çubuğu 66 + üç boşluk 36 = 329. Birkaç piksel pay
+     * bırakıyoruz: eksik hesap sayfayı kaydırılır yapıyor ve araç çubuğu
+     * ekrandan çıkıyor — fazla pay yalnızca sahneyi bir tık küçültür.
+     */
+    --stage-chrome: 336px;
+    width: min(100%, calc(max(100vh - var(--stage-chrome), 260px) * 16 / 9));
+    width: min(100%, calc(max(100dvh - var(--stage-chrome), 260px) * 16 / 9));
+    margin-inline: auto;
+  }
+  /* Ortak tarayıcı modunda oynat/duraklat şeridi gizleniyor; yer açılıyor. */
+  .browser-mode .stage-col > .stage { --stage-chrome: 256px; }
+}
 #player, #player iframe, #video { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 #video { background: #000; object-fit: contain; }
 .stage-empty {
@@ -266,6 +294,24 @@ input::placeholder { color: var(--text-faint); }
   justify-items: center; color: var(--text-faint); pointer-events: none;
 }
 .stage-empty span { font-size: 40px; opacity: .5; }
+
+/* Seçilen videonun kapağı — oynatıcı gelene kadar sahnede durur.
+   pointer-events: none, çünkü altındaki oynatıcıya tıklanabilmeli. */
+.stage-poster {
+  position: absolute; inset: 0; background: #000; pointer-events: none;
+  display: grid; place-items: center;
+}
+.stage-poster img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; opacity: .55; filter: blur(1px);
+}
+.stage-poster img[hidden] { display: none; }
+.stage-poster-note {
+  position: relative; z-index: 1; margin: 0;
+  padding: 8px 16px; border-radius: 999px;
+  background: rgba(0, 0, 0, .62); border: 1px solid var(--line-soft);
+  color: var(--text); font-size: 13px; backdrop-filter: blur(6px);
+}
 
 .controls {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -564,12 +610,37 @@ input::placeholder { color: var(--text-faint); }
 .linkbar-hint:empty { display: none; }
 .linkbar-hint { margin-top: -4px; padding-left: 14px; }
 
+/* Tam ekran: sahne ekranı kaplar, görüntü oranını koruyup ortalanır. Sunucu
+   sayfası 1280x720 render edildiği için tam ekranda ölçek büyümez —
+   büyüyen tek şey görüntünün ekranda kapladığı alan. */
+/**
+ * Tam ekrana SÜTUN girer, sahne değil.
+ *
+ * Önce yalnızca `.stage` tam ekrana alınıyordu ve araç çubuğu ekrandan
+ * siliniyordu: tam ekrana giren kullanıcı ne gezinebiliyor ne de düğmeyle geri
+ * çıkabiliyordu — tek çıkış Esc'ti. Sütunu alınca adres çubuğu, geri/ileri ve
+ * medya düğmeleri tam ekranda da elinin altında kalıyor.
+ */
+.stage-col:fullscreen {
+  width: 100vw; height: 100vh; box-sizing: border-box;
+  padding: 12px; gap: 10px; background: var(--bg);
+}
+/* Seçici, yukarıdaki `.stage-col > .stage` genişlik kuralını yenecek kadar
+   belirgin olmalı; aksi halde tam ekranda sahne yine sütun genişliğinde kalır. */
+.stage-col:fullscreen > .stage {
+  aspect-ratio: auto; width: 100%; max-height: none;
+  flex: 1 1 auto; min-height: 0; border-radius: var(--r);
+}
+
 /* Ortak tarayıcı gezinme düğmeleri */
-.nav-buttons { display: flex; gap: 2px; }
+.nav-buttons { display: flex; gap: 2px; flex: none; }
 .btn-icon {
-  width: 30px; height: 30px; padding: 0; font-size: 16px; line-height: 1;
+  width: 32px; height: 32px; padding: 0; font-size: 15px; line-height: 1;
   display: inline-grid; place-items: center;
 }
+/* Sürücü değilken düğmeleri GİZLEMİYORUZ: kaybolan bir araç çubuğu
+   "tarayıcının geri tuşu yok" gibi görünüyordu. Soluk ama duruyor. */
+.nav-buttons .btn-icon:disabled { opacity: .35; cursor: not-allowed; }
 
 /* Yükleniyor çubuğu — sayfanın açıldığını görmek gerekiyor. */
 .bw-progress { height: 2px; background: var(--line); border-radius: 2px; overflow: hidden; }

@@ -5,7 +5,7 @@
 [![CI](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/Node-24-3c873a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Test](https://img.shields.io/badge/test-87%20senaryo-3ecf8e)
+![Test](https://img.shields.io/badge/test-93%20senaryo-3ecf8e)
 
 Arkadaşlarınla aynı anda video izlemeyi sağlayan gerçek zamanlı senkron motoru:
 YouTube, kendi yüklediğin videolar, ekran paylaşımı ya da sunucuda açılan
@@ -20,7 +20,7 @@ yatay ölçeklenebilir WebSocket katmanı.
 > zamanlı sistemler, asenkron iş işleme ve yatay ölçeklemeyi **ölçülmüş
 > sonuçlarla** göstermek.
 
-**Durum:** Faz 0–6 tamamlandı · **87 otomatik test** (gerçek Chrome testi dahil) ·
+**Durum:** Faz 0–6 tamamlandı · **93 otomatik test** (gerçek Chrome testi dahil) ·
 tip kontrolü temiz · üretim imajı root olmayan kullanıcıyla çalışıyor
 
 <p align="center">
@@ -208,10 +208,10 @@ npm run smoke           # 13 · sağlık, auth, hata yolları, güvenlik davran�
 npm run sync-test       # 25 · senkron motoru, saat, versiyon, bilet, host devri
 npm run pipeline-test   # 14 · kuyruk mekanizmaları + gerçek ffmpeg transkodu
 npm run scale-test      # 12 · iki instance arası tutarlılık
-npm run browser-test    # 23 · gerçek Chrome, iki sekme (HEADLESS=0 ile izle)
+npm run browser-test    # 29 · gerçek Chrome, iki sekme (HEADLESS=0 ile izle)
 ```
 
-Toplam **87 senaryo**, hepsi CI'da da koşuyor.
+Toplam **93 senaryo**, hepsi CI'da da koşuyor.
 
 Testler yalnızca "çalışıyor mu"yu değil **güvenlik davranışını** da doğruluyor:
 parola özeti sızıyor mu, kullanıcı numaralandırma mesajları aynı mı, bilet
@@ -521,12 +521,26 @@ scripts/   migration aracı + beş test paketi
 - **Google aramaları açılmaz**: sunucuda çalışan tarayıcıları bot kontrolüne
   (`google.com/sorry`) yolluyor. Adres çubuğuna yazılan aramalar bu yüzden
   DuckDuckGo'ya gidiyor; Bing, Wikipedia ve YouTube araması sorunsuz.
+  Bot kontrolünü **atlatmaya çalışmıyoruz** — sitelerin bu kararı kendilerinin.
+  Karşımıza bir doğrulama çıkarsa oda kurucusu onu canvas üzerinden kendisi
+  çözebilir: fare ve klavye gerçek sayfaya iletildiği için kutucuğa tıklamak
+  çalışır.
 - Ortak tarayıcı **yatay ölçeklenmez**: bir odanın sekmesi belirli bir süreçte
   yaşar. Birden fazla kopya için slug'a göre yapışkan yönlendirme gerekir.
   Ayrıca oda başına bir Chromium sekmesi ciddi bir maliyet kalemi — Rabb.it'i
   batıran kalem buydu; varsayılan tavan 4 eşzamanlı oda.
-- Ortak tarayıcıda bant genişliği kare başına ~51 KB (960x540, JPEG q45).
-  Sayfa durgunken hiç kare gitmez; kaydırırken izleyici başına ~750 KB/sn.
+- Ortak tarayıcıda bant genişliği kare başına ~110 KB (1280x720, JPEG q72).
+  Sayfa durgunken hiç kare gitmez; kaydırırken izleyici başına ~1,7 MB/sn
+  ölçüldü. Yerel ağ için rahat, internet üzerinden ağır: `BROWSER_QUALITY`,
+  `BROWSER_MAX_FPS` ve `BROWSER_WIDTH/HEIGHT` ile kısılabilir. Yavaş izleyiciye
+  kare YIĞILMAZ; soket kuyruğu dolduğunda o izleyici kare atlar (geri basınç),
+  çünkü yığmak görüntüyü hızlandırmaz, geciktirir.
+- Sunucudaki sekmeler `--disable-renderer-backgrounding` ailesi ve CDP odak
+  taklidiyle canlı tutuluyor. Chrome'da aynı anda tek sekme ön planda olabilir
+  ve arka plandaki sekmenin compositor'ı durur: bunlar olmadan **ikinci oda
+  açılır açılmaz birincinin görüntüsü donuyordu** (ölçüm: 42 kaydırma olayına
+  karşılık 0 kare; düzeltmeyle 17 kare). Tek odada test ederken hiç görünmeyen
+  bir kusurdu.
 - Yük testi k6 tek konteynerde 2.500 VU'dan sonra kendi darboğazına giriyor —
   daha yükseği için birden fazla üreteç gerekir.
 

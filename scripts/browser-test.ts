@@ -34,12 +34,25 @@ function skip(name: string, reason: string): void {
   process.stdout.write(`  ${YELLOW}⊘${RESET} ${name}  ${DIM}atlandı: ${reason}${RESET}\n`);
 }
 
+/**
+ * Senaryonun içinden "bu ortamda ölçülemez" demenin yolu.
+ *
+ * Ortam eksikliğiyle ürün hatasını aynı kefeye koymak testleri güvenilmez
+ * yapıyor: kırmızıya alışan kimse kırmızıya bakmaz. Bazı önkoşullar ancak
+ * senaryo çalışırken anlaşıldığı için `skip()` çağrısı her zaman yetmiyor.
+ */
+class SkipError extends Error {}
+
 async function check(name: string, fn: () => Promise<string | void>): Promise<void> {
   try {
     const detail = await fn();
     passed++;
     process.stdout.write(`  ${GREEN}✓${RESET} ${name}${detail ? `  ${DIM}${detail}${RESET}` : ''}\n`);
   } catch (err) {
+    if (err instanceof SkipError) {
+      skip(name, err.message);
+      return;
+    }
     failed++;
     process.stdout.write(
       `  ${RED}✗${RESET} ${name}\n    ${RED}${err instanceof Error ? err.message : String(err)}${RESET}\n`,
@@ -592,6 +605,54 @@ try {
     return 'yayın B\'de açıldı';
   });
 
+  /**
+   * Kullanıcının şikâyeti: "link attık ama atılıp atılmadığı belli olmuyor."
+   * Oynatıcı ağdan yüklenene kadar sahne bomboş kalıyordu.
+   *
+   * "Şu an kapak görünüyor mu" diye bakmak yarışa açık — oynatıcı hızlı
+   * gelirse kapak biz bakmadan kalkar. Bu yüzden tıklamadan ÖNCE gözlemci
+   * kurup kapağın HİÇ görünüp görünmediğini kaydediyoruz.
+   */
+  await check('YouTube linki yapıştırılır yapıştırılmaz kapak geliyor', async () => {
+    const VID = 'M7lc1UVf-VE';
+
+    // Dikkat: evaluate içinde ADLANDIRILMIŞ fonksiyon tanımlamayın. tsx (esbuild)
+    // isim korumak için `__name(...)` sarmalıyor; o yardımcı sayfa bağlamında
+    // yok ve callback "__name is not defined" ile patlıyor.
+    const watchPoster = (page: Page) => page.evaluate(() => {
+      const g = globalThis as unknown as { __posterSeen?: string };
+      g.__posterSeen = undefined;
+      const box = document.getElementById('stage-poster');
+      const img = document.getElementById('stage-poster-img') as HTMLImageElement | null;
+      if (!box || !img) return;
+      const obs = new MutationObserver(() => {
+        if (!g.__posterSeen && !box.classList.contains('is-hidden')) {
+          g.__posterSeen = img.getAttribute('src') || 'src-yok';
+        }
+      });
+      obs.observe(box, { attributes: true, attributeFilter: ['class'] });
+      obs.observe(img, { attributes: true, attributeFilter: ['src'] });
+    });
+
+    await Promise.all([watchPoster(pageA), watchPoster(pageB)]);
+
+    await pageA.$eval('#stage-url', (el) => {
+      (el as HTMLInputElement).value = 'https://youtu.be/M7lc1UVf-VE';
+    });
+    await click(pageA, '#btn-stage-url');
+
+    const seen = (page: Page) => page.waitForFunction(
+      () => (globalThis as unknown as { __posterSeen?: string }).__posterSeen ?? null,
+      { timeout: 8000, polling: 100 },
+    ).then((h) => h.jsonValue() as Promise<string>).catch(() => null);
+
+    const [a, b] = await Promise.all([seen(pageA), seen(pageB)]);
+    assert(a?.includes(VID), `A'da kapak gösterilmedi: ${a}`);
+    // Karşı taraf kapağı sunucudan gelen kaynak değişimiyle görür.
+    assert(b?.includes(VID), `B'de kapak gösterilmedi: ${b}`);
+    return 'kapak iki tarafta da anında geldi';
+  });
+
   // Ortak tarayıcı ayrı ve İSTEĞE BAĞLI bir servis; çalışmıyorsa oda normal
   // çalışmaya devam eder, o yüzden testler atlanır, kırılmaz.
   const browserSvc = await fetch('http://127.0.0.1:8094/healthz')
@@ -613,9 +674,45 @@ try {
     { timeout: 25_000, polling: 500 },
   ).then(() => true).catch(() => false);
 
+  /** Servisin oda başına tuttuğu akış sayaçları — kare hızı ölçümlerinin kaynağı. */
+  type Stat = { slug: string; frames: number; avgFrameKb: number; droppedFrames: number };
+  const stats = async (forSlug: string): Promise<Stat | null> => {
+    const body = await fetch('http://127.0.0.1:8094/healthz')
+      .then((r) => r.json() as Promise<{ sessions?: Stat[] }>)
+      .catch(() => null);
+    return body?.sessions?.find((s) => s.slug === forSlug) ?? null;
+  };
+
+  /**
+   * Canvas üzerinde kaydırma üretir. Yön değiştiriyoruz: tek yönde gidersek
+   * sayfa dibe vurur, ekran değişmemeye başlar ve kare hızı yerine sayfanın
+   * boyu ölçülür.
+   */
+  const scrollCanvas = (page: Page, rounds: number, gapMs: number) => page.evaluate(
+    async (n: number, gap: number) => {
+      const c = document.getElementById('browser-view') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect();
+      const x = r.left + r.width / 2;
+      const y = r.top + r.height / 2;
+      for (let i = 0; i < n; i++) {
+        c.dispatchEvent(new WheelEvent('wheel', {
+          deltaY: i % 10 < 5 ? 120 : -120,
+          clientX: x, clientY: y, bubbles: true, cancelable: true,
+        }));
+        await new Promise((res) => setTimeout(res, gap));
+      }
+    },
+    rounds, gapMs,
+  );
+
   if (!browserSvc) {
     skip('Ortak tarayıcı iki sekmede de çiziliyor', 'servis çalışmıyor (npm run dev:browser)');
+    skip('Kareler tam çözünürlükte geliyor', 'servis çalışmıyor');
+    skip('Kaydırırken kare hızı ve kare boyutu makul', 'servis çalışmıyor');
+    skip('İkinci oda açılınca birinci odanın görüntüsü donmuyor', 'servis çalışmıyor');
     skip('Ortak tarayıcıyı yalnızca oda kurucusu sürüyor', 'servis çalışmıyor');
+    skip('Gezinme çubuğu izleyicide de duruyor ama pasif', 'servis çalışmıyor');
+    skip('Tam ekran sahneyi ekrana yayıyor, düğmeyle çıkılıyor', 'servis çalışmıyor');
     skip('Adres çubuğu arama yapıyor, geri düğmesi geçmişi geziyor', 'servis çalışmıyor');
     skip('Ortak tarayıcıdan YouTube linkiyle videoya dönülüyor', 'servis çalışmıyor');
   } else {
@@ -628,6 +725,110 @@ try {
       assert(await canvasPainted(pageA), `A: canvas boş kaldı · ${await neden(pageA)}`);
       assert(await canvasPainted(pageB), `B: kare gelmedi · ${await neden(pageB)}`);
       return 'sunucu sekmesi iki tarafta da çizildi';
+    });
+
+    /**
+     * "pixel pixel gözüküyor" şikâyetinin ölçülebilir hâli.
+     *
+     * Sayfa 1280x720 render edilirken kare 960x540 gönderiliyordu; canvas onu
+     * geri büyütüyor, tarayıcı ekrana yerleştirirken bir daha küçültüyordu.
+     * İki kez yeniden örneklenen metin okunmaz oluyordu. Canvas artık kareyle
+     * aynı boyutta; küçülme olursa bu test yakalar.
+     */
+    await check('Kareler tam çözünürlükte geliyor', async () => {
+      const d = await pageA.$eval('#browser-view', (el) => {
+        const c = el as HTMLCanvasElement;
+        return { w: c.width, h: c.height };
+      });
+      assert(d.w >= 1280 && d.h >= 720, `kare küçültülerek geliyor: ${d.w}x${d.h}`);
+      return `${d.w}×${d.h}`;
+    });
+
+    /**
+     * "Çok kötü kasıyor" şikâyetinin ölçülebilir hâli.
+     *
+     * Üç ayrı sebebi var ve çareleri farklı: kare hızı düşük olabilir, kareler
+     * büyük olabilir, ya da yavaş bir izleyici yüzünden kare atılıyor olabilir.
+     * Servis üçünü de sayıyor; burada kaydırırken ölçüp eşiklere bakıyoruz.
+     */
+    await check('Kaydırırken kare hızı ve kare boyutu makul', async () => {
+      // Uzun bir sayfa gerekiyor: portal sayfası birkaç kaydırmada dibe vurur,
+      // sonrasında ekran DEĞİŞMEDİĞİ için kare de üretilmez ve ölçüm kare
+      // hızını değil sayfanın boyunu ölçer.
+      await pageA.$eval('#stage-url', (el) => {
+        (el as HTMLInputElement).value = 'https://tr.wikipedia.org/wiki/T%C3%BCrkiye';
+      });
+      await click(pageA, '#btn-stage-url');
+      await sleep(6000);
+
+      const before = await stats(slug);
+      assert(before, `oturum healthz'de görünmüyor (slug ${slug})`);
+
+      await pageA.bringToFront();
+      const t0 = Date.now();
+      await scrollCanvas(pageA, 40, 75);
+      const seconds = (Date.now() - t0) / 1000;
+      await sleep(700);   // yoldaki son kareler de gelsin
+
+      const after = await stats(slug);
+      assert(after, 'ölçüm sonrası oturum kayboldu');
+      const fps = (after.frames - before.frames) / seconds;
+      const atilan = after.droppedFrames - before.droppedFrames;
+
+      // Eski yapılandırma (everyNthFrame 2) tavanı 15 fps'e kilitliyordu ve
+      // kaydırma kesik kesik görünüyordu. 8 fps eşiği o gerilemeyi yakalar.
+      assert(fps >= 8, `kare hızı düşük: ${fps.toFixed(1)} fps`);
+      // 1280x720 q72 ölçümü ~93 KB. 200 KB üstü kalite ayarının kaçtığını gösterir.
+      assert(after.avgFrameKb <= 200, `kareler çok büyük: ${after.avgFrameKb} KB`);
+      return `${fps.toFixed(1)} fps · ~${after.avgFrameKb} KB/kare · ${atilan} atıldı`;
+    });
+
+    /**
+     * "Çok kötü kasıyor" şikâyetinin KÖK NEDENİ.
+     *
+     * Sunucuda oda başına bir sekme tutuyoruz ama Chrome'da aynı anda yalnızca
+     * BİR sekme ön planda olabilir. Arka plandaki sekmenin compositor'ı durur
+     * ve `Page.screencastFrame` hiç gelmez: ikinci oda açılır açılmaz
+     * birincinin görüntüsü donuyordu ve donma tek odada test edilirken hiç
+     * görünmüyordu.
+     *
+     * Ölçüm (bu senaryonun kurduğu düzende): kısma bayrakları ve odak taklidi
+     * olmadan 42 kaydırma olayına karşılık 0 kare; ikisi açıkken 17 kare.
+     */
+    await check('İkinci oda açılınca birinci odanın görüntüsü donmuyor', async () => {
+      const pageC = await pageA.browser().newPage();
+      try {
+        // İkinci oda: sunucuda ikinci bir sekme açılır ve birincisi arka plana
+        // düşer. Asıl sınanan şey bundan sonra olanlar.
+        await setupUser(pageC, APP);
+        await click(pageC, '#btn-create');
+        await pageC.waitForSelector('[data-source="browser"]', { timeout: 10_000 });
+        await click(pageC, '[data-source="browser"]');
+        await click(pageC, '#btn-source-go');
+        const ikinciAcildi = await pageC.waitForFunction(
+          () => (globalThis as any).__sync?.()?.browserActive === true,
+          { timeout: 30_000, polling: 300 },
+        ).then(() => true).catch(() => false);
+        if (!ikinciAcildi) {
+          const neden = await pageC.$eval('#chat-log', (el) => (el.textContent ?? '').trim().slice(-100));
+          throw new SkipError(`ikinci oturum açılmadı · ${neden}`);
+        }
+
+        const before = await stats(slug);
+        assert(before, 'birinci oturum healthz\'de yok');
+
+        await pageA.bringToFront();
+        await scrollCanvas(pageA, 24, 90);
+        await sleep(900);
+
+        const after = await stats(slug);
+        assert(after, 'birinci oturum kayboldu');
+        const kare = after.frames - before.frames;
+        assert(kare >= 5, `arka plandaki oda dondu: 24 kaydırmaya karşılık ${kare} kare`);
+        return `arka plandaki oda ${kare} kare üretti`;
+      } finally {
+        await pageC.close().catch(() => {});
+      }
     });
 
     await check('Ortak tarayıcıyı yalnızca oda kurucusu sürüyor', async () => {
@@ -662,6 +863,70 @@ try {
       assert(!after.includes('example.com'), `sayfa yine de değişti: ${after}`);
       void before;
       return 'arayüz kilitli, sunucu da reddediyor';
+    });
+
+    /**
+     * Kilitli olmakla YOK olmak aynı şey değil. Geri/ileri/yenile düğmeleri
+     * sürücü olmayana hiç gösterilmiyordu ve "bu tarayıcının geri tuşu yok"
+     * gibi görünüyordu. Artık duruyor, yalnızca pasif.
+     */
+    await check('Gezinme çubuğu izleyicide de duruyor ama pasif', async () => {
+      const t = await pageB.evaluate(() => ({
+        nav: document.getElementById('nav-buttons')?.classList.contains('is-hidden'),
+        tools: document.getElementById('bw-tools')?.classList.contains('is-hidden'),
+        back: (document.getElementById('btn-bw-back') as HTMLButtonElement | null)?.disabled,
+        reload: (document.getElementById('btn-bw-reload') as HTMLButtonElement | null)?.disabled,
+        full: (document.getElementById('btn-bw-full') as HTMLButtonElement | null)?.disabled,
+      }));
+      assert(t.nav === false && t.tools === false, `çubuk B'de gizlenmiş: ${JSON.stringify(t)}`);
+      assert(t.back === true && t.reload === true, `sürüş düğmeleri izleyicide etkin: ${JSON.stringify(t)}`);
+      // Tam ekran yerel bir görüntüleme tercihi; izleyiciden alınmamalı.
+      assert(t.full === false, 'tam ekran izleyiciye kapatılmış');
+      return 'çubuk duruyor, sürüş düğmeleri pasif';
+    });
+
+    /**
+     * Sunucu sayfası 1280x720 render ediliyor ama yan panelin yanındaki
+     * sahnede ~%60 ölçekle gösteriliyor ve yazılar küçülüyor. Tam ekran, sayfayı
+     * kendi çözünürlüğünde göstermenin yolu.
+     */
+    await check('Tam ekran sahneyi ekrana yayıyor, düğmeyle çıkılıyor', async () => {
+      try {
+        await click(pageA, '#btn-bw-full');
+        const on = await pageA.waitForFunction(
+          () => document.fullscreenElement?.classList.contains('stage-col') === true,
+          { timeout: 6000, polling: 100 },
+        ).then(() => true).catch(() => false);
+
+        if (!on) {
+          // Fullscreen API geçici kullanıcı etkileşimi ister; bazı ortamlarda
+          // (headless yapılandırması, kiosk politikaları) izin hiç verilmiyor.
+          // Bu bir ürün hatası değil — ama sessizce geçmesin diye söylüyoruz.
+          const neden = await pageA.$eval('#chat-log', (el) => (el.textContent ?? '').trim().slice(-80));
+          throw new SkipError(`ortam tam ekrana izin vermiyor · ${neden}`);
+        }
+
+        const box = await pageA.$eval('#browser-view', (el) => {
+          const r = el.getBoundingClientRect();
+          return { w: Math.round(r.width), h: Math.round(r.height) };
+        });
+        assert(box.w >= 1200, `tam ekranda sahne büyümedi: ${box.w}x${box.h}`);
+
+        // Asıl mesele: araç çubuğu tam ekranda da GÖRÜNÜR ve TIKLANABİLİR
+        // olmalı. Sahneyi tek başına tam ekrana alan ilk sürümde çubuk yok
+        // oluyordu ve tam ekrandan çıkmanın tek yolu Esc kalıyordu.
+        await click(pageA, '#btn-bw-full');
+        const off = await pageA.waitForFunction(
+          () => document.fullscreenElement === null,
+          { timeout: 6000, polling: 100 },
+        ).then(() => true).catch(() => false);
+        assert(off, 'tam ekranda araç çubuğu tıklanamadı, çıkılamadı');
+        return `${box.w}×${box.h} → düğmeyle çıkıldı`;
+      } finally {
+        // Tam ekranda takılı kalırsak sonraki senaryolar da düşer; asıl hata
+        // teşhis edilemez hâle gelir.
+        await pageA.evaluate(() => document.exitFullscreen?.().catch(() => {})).catch(() => {});
+      }
     });
 
     const addressBar = (page: Page) =>

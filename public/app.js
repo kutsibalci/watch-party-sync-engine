@@ -150,6 +150,40 @@ function showStage(kind) {
     if (el) el.hidden = name !== kind;
   }
   $('stage-empty').classList.toggle('is-hidden', kind !== 'empty');
+  // Kapak yalnızca YouTube sahnesine aittir; başka katmana geçince kalkar.
+  if (kind !== 'youtube') clearPoster();
+}
+
+/**
+ * Seçilen videonun kapak fotoğrafı.
+ *
+ * Bağlantı yapıştırıldığında sahne, YouTube oynatıcısı ağdan yüklenene kadar
+ * bomboş kalıyordu: link gitti mi gitmedi mi anlaşılmıyordu. Kapak, kimliği
+ * çözer çözmez — sunucudan yanıt beklemeden — sahneye geliyor.
+ */
+function setPoster(videoId, note) {
+  const img = $('stage-poster-img');
+  const src = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+  if (img.getAttribute('src') !== src) {
+    img.hidden = false;
+    // Ağ YouTube'a kapalıysa kırık resim simgesi göstermektense hiç gösterme;
+    // altındaki yazı zaten ne olduğunu söylüyor.
+    img.onerror = () => { img.hidden = true; };
+    img.setAttribute('src', src);
+  }
+  $('stage-poster-note').textContent = note ?? 'Video yükleniyor…';
+  $('stage-poster').classList.remove('is-hidden');
+}
+
+function clearPoster() {
+  $('stage-poster').classList.add('is-hidden');
+}
+
+/** Kapak duruyorsa üstündeki yazıyı değiştirir; durmuyorsa hiçbir şey yapmaz. */
+function posterNote(text) {
+  if (!$('stage-poster').classList.contains('is-hidden')) {
+    $('stage-poster-note').textContent = text;
+  }
 }
 
 /**
@@ -163,12 +197,18 @@ function warnIfYouTubeStalls() {
   ytWarnTimer = setTimeout(() => {
     ytWarnTimer = null;
     if (ytReady) return;
+    posterNote('YouTube oynatıcısı yüklenemedi');
     addSystem('YouTube oynatıcısı yüklenemedi. "Diğer kaynaklar" ile kendi videonu ya da ortak tarayıcıyı kullanabilirsin.');
   }, 8000);
 }
 
+/** Yollanmış ama sunucudan henüz geri dönmemiş YouTube kimliği. */
+let pendingYtId = null;
+
 function mountSource(source, startAtMs, shouldPlay) {
   if (!source) return;
+  // Sunucu artık bu kaynağı biliyor; iyimser niyeti bırakabiliriz.
+  pendingYtId = null;
 
   if (source.type === 'youtube') {
     showStage('youtube');
@@ -181,8 +221,15 @@ function mountSource(source, startAtMs, shouldPlay) {
     }
     // Etiketi HER ZAMAN yaz: oynatıcı gelmese bile ne seçildiği görünsün.
     $('source-label').textContent = `youtube · ${source.videoId}`;
+
+    // applyState her sürüm artışında (oynat/duraklat/atlama) buradan geçiyor.
+    // Kapağı koşulsuz göstermek oynayan videonun üstünü örterdi; yalnızca
+    // oynatıcıda HENÜZ bu video yokken gösteriyoruz.
+    const loaded = ytReady && ytPlayer.getVideoData?.()?.video_id === source.videoId;
+    if (!loaded) setPoster(source.videoId);
+
     if (!ytReady) { warnIfYouTubeStalls(); return; }
-    if (ytPlayer.getVideoData?.()?.video_id !== source.videoId) {
+    if (!loaded) {
       ytPlayer.loadVideoById(source.videoId, startAtMs / 1000);
       if (!shouldPlay) ytPlayer.pauseVideo();
     }
@@ -223,6 +270,10 @@ window.onYouTubeIframeAPIReady = () => {
         ytReady = true;
         if (state) { seenVersion -= 1; applyState(state); }
       },
+      // -1 = hiç başlamadı. Onun dışındaki her durumda oynatıcı artık
+      // videonun kendi karesini gösteriyor; kapağı çekiyoruz.
+      onStateChange: (e) => { if (e.data !== -1) clearPoster(); },
+      onError: () => posterNote('Bu video oynatılamıyor (kaldırılmış ya da gömmeye kapalı olabilir)'),
     },
   });
 };
@@ -338,6 +389,12 @@ async function playPastedLink() {
   const ytId = parseYouTubeId(raw);
   if (ytId) {
     if (browserActive) sharedBrowser.stop();
+    // Kapağı sunucu yanıtını BEKLEMEDEN gösteriyoruz. Sürüm dönene kadar
+    // geçen sürede ekranda hiçbir şey değişmiyordu ve linkin gidip gitmediği
+    // belli olmuyordu; sahne artık aynı anda tepki veriyor.
+    pendingYtId = ytId;
+    showStage('youtube');
+    setPoster(ytId);
     sendMsg({ type: 'SET_SOURCE', source: { type: 'youtube', videoId: ytId } });
     $('stage-url').value = '';
     return;
@@ -436,6 +493,7 @@ $('btn-leave').onclick = () => {
   $('btn-browser').dataset.on = 'false';
   $('screen-room').classList.remove('browser-mode');
   $('bw-progress').classList.add('is-hidden');
+  pendingYtId = null;
   showStage('empty');
   updateLinkbar();
   slug = ''; state = null; seenVersion = 0;
@@ -801,6 +859,10 @@ $('btn-screen').onclick = () => queueMedia(async () => {
  * kaynağına dönülür. Yoksa boş sahne.
  */
 function restoreSourceStage() {
+  // Yeni bir YouTube linki yollandıysa odanın ESKİ kaynağına dönmek yanlış:
+  // ortak tarayıcı kapanışı ile SET_SOURCE yanıtı arasında sahne bir an eski
+  // videoya atlıyordu. Bekleyen niyet önce gelir.
+  if (pendingYtId) { showStage('youtube'); setPoster(pendingYtId); return; }
   if (!state?.source) { showStage('empty'); return; }
   showStage(state.source.type === 'youtube' ? 'youtube' : 'hls');
 }
@@ -930,6 +992,31 @@ const sharedBrowser = createSharedBrowser({
 $('btn-bw-back').onclick = () => sharedBrowser.back();
 $('btn-bw-fwd').onclick = () => sharedBrowser.forward();
 $('btn-bw-reload').onclick = () => sharedBrowser.reload();
+$('btn-bw-close').onclick = () => sharedBrowser.stop();
+
+/**
+ * Tam ekran.
+ *
+ * Sunucudaki sayfa 1280x720 render ediliyor; yan panelin yanındaki ~900
+ * piksellik sahnede bu görüntü küçültülerek gösteriliyor ve yazılar okunmaz
+ * oluyordu. Tam ekranda görüntü kendi çözünürlüğüne yakın gösterildiği için
+ * "tarayıcının tamamını görme" isteği burada karşılanıyor.
+ */
+$('btn-bw-full').onclick = () => {
+  // Tam ekrana SÜTUN girer: sahneyi tek başına almak araç çubuğunu ekrandan
+  // siliyordu ve tam ekrandan çıkmanın tek yolu Esc kalıyordu.
+  const col = document.querySelector('.stage-col');
+  if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+  else void col.requestFullscreen?.().catch((e) => addSystem(`Tam ekrana geçilemedi: ${e.message}`));
+};
+
+// Tam ekranda klavye canvas'a gitmeli; odak sahneye geçince kayboluyordu.
+document.addEventListener('fullscreenchange', () => {
+  const on = Boolean(document.fullscreenElement);
+  $('btn-bw-full').textContent = on ? '⤡' : '⛶';
+  $('btn-bw-full').title = on ? 'Tam ekrandan çık' : 'Tam ekran';
+  if (on && browserActive) $('browser-view').focus();
+});
 
 // Bağlantı çubuğu iki işe birden bakıyor; hangisinde olduğumuz belli olsun.
 // Kaynağı ve ortak tarayıcıyı yalnızca kurucu sürebildiği için, sürücü
@@ -951,7 +1038,17 @@ function updateLinkbar() {
   }
   $('btn-stage-url').textContent = browserActive ? 'Git' : 'Aç';
   $('linkbar-icon').textContent = browserActive ? '🌐' : '▶';
-  $('nav-buttons').classList.toggle('is-hidden', !browserActive || !iAmHost);
+
+  // Araç çubuğu tarayıcı açıkken HERKESE görünür; sürücü olmayanda yalnızca
+  // pasifleşir. Gizlemek "bu tarayıcının geri tuşu yok" gibi görünüyordu.
+  $('nav-buttons').classList.toggle('is-hidden', !browserActive);
+  $('bw-tools').classList.toggle('is-hidden', !browserActive);
+  for (const id of ['btn-bw-back', 'btn-bw-fwd', 'btn-bw-reload', 'btn-bw-close']) {
+    $(id).disabled = !iAmHost;
+  }
+  // Tam ekran yerel bir görüntüleme tercihi; izleyicinin de hakkı var.
+  $('btn-bw-full').disabled = false;
+
   $('browser-hint').textContent = browserActive && !iAmHost
     ? 'Ortak tarayıcıyı oda kurucusu sürüyor'
     : '';

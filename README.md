@@ -5,7 +5,7 @@
 [![CI](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/Node-24-3c873a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Test](https://img.shields.io/badge/tests-87%20scenarios-3ecf8e)
+![Test](https://img.shields.io/badge/tests-93%20scenarios-3ecf8e)
 
 A real-time synchronisation engine for watching video together: YouTube, your own
 uploads, a shared screen, or a browser that runs on the server and everyone drives
@@ -20,7 +20,7 @@ and on YouTube. That is a deliberate scope decision; the reasoning is
 > stateful real-time systems, asynchronous job processing and horizontal scaling
 > **with measured results**.
 
-**Status:** phases 0–6 complete · **87 automated tests** (including a real Chrome test) ·
+**Status:** phases 0–6 complete · **93 automated tests** (including a real Chrome test) ·
 type-check clean · production image runs as a non-root user
 
 <p align="center">
@@ -212,10 +212,10 @@ npm run smoke           # 13 · health, auth, error paths, security behaviour
 npm run sync-test       # 25 · sync engine, clock, versioning, tickets, host handover
 npm run pipeline-test   # 14 · queue mechanics + a real ffmpeg transcode
 npm run scale-test      # 12 · consistency across two instances
-npm run browser-test    # 23 · real Chrome, two tabs (watch it with HEADLESS=0)
+npm run browser-test    # 29 · real Chrome, two tabs (watch it with HEADLESS=0)
 ```
 
-**87 scenarios** in total, all of them running in CI as well.
+**93 scenarios** in total, all of them running in CI as well.
 
 The tests check more than "does it work" — they check **security behaviour**: whether
 the password hash leaks, whether the user-enumeration messages are identical, whether
@@ -524,13 +524,25 @@ scripts/   migration tool + four test suites
   server-side; hiding the button in the client would not be enough.
 - **Google search does not load**: it sends server-side browsers to its bot check
   (`google.com/sorry`). Searches typed in the address bar therefore go to DuckDuckGo;
-  Bing, Wikipedia and YouTube search all work.
+  Bing, Wikipedia and YouTube search all work. We **do not try to bypass** the bot
+  check — that call belongs to the sites. If a challenge does appear, the room
+  creator can solve it in the canvas themselves: mouse and keyboard are forwarded
+  to the real page, so clicking the checkbox works.
 - The shared browser **does not scale horizontally**: a room's tab lives in one
   specific process, so multiple replicas would need sticky routing by slug. One
   Chromium tab per room is also a real cost line — the one that killed Rabb.it — so
   the default cap is 4 concurrent rooms.
-- Shared-browser bandwidth is ~51 KB per frame (960x540, JPEG q45). A still page sends
-  nothing; while scrolling it is roughly 750 KB/s per viewer.
+- Shared-browser bandwidth is ~110 KB per frame (1280x720, JPEG q72). A still page
+  sends nothing; while scrolling it measured roughly 1.7 MB/s per viewer. Comfortable
+  on a LAN, heavy over the internet — turn it down with `BROWSER_QUALITY`,
+  `BROWSER_MAX_FPS` and `BROWSER_WIDTH/HEIGHT`. Frames are never piled onto a slow
+  viewer: once its socket queue fills, that viewer skips frames (backpressure),
+  because piling up does not speed the picture up, it delays it.
+- Server-side tabs are kept awake with the `--disable-renderer-backgrounding` family
+  plus CDP focus emulation. Only one Chrome tab can be foreground at a time and a
+  background tab's compositor stops: without these, **opening a second room froze the
+  first room's picture** (measured: 0 frames for 42 scroll events; 17 frames with the
+  fix). The defect was invisible while testing a single room.
 - The load test hits its own bottleneck past 2,500 VUs in a single k6 container —
   going higher needs multiple generators.
 

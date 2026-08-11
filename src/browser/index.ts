@@ -36,7 +36,10 @@ await app.register(websocket, { options: { maxPayload: 256 * 1024 } });
 app.get('/healthz', async () => ({
   status: 'ok',
   uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
-  sessions: [...sessions.entries()].map(([slug, s]) => ({ slug, active: s.active })),
+  // Akış sayaçları burada: "takılıyor" şikâyetinin sebebi kare hızı mı, kare
+  // boyutu mu, yoksa yavaş izleyici yüzünden atılan kareler mi — ayırt etmek
+  // için ölçüme ihtiyaç var.
+  sessions: [...sessions.entries()].map(([slug, s]) => ({ slug, active: s.active, ...s.stats() })),
 }));
 
 app.get('/readyz', async (_req, reply) => {

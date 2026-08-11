@@ -110,6 +110,14 @@ export const BrowserClientMessageSchema = z.discriminatedUnion('type', [
     button: z.enum(['none', 'left', 'middle', 'right']).optional(),
     deltaX: z.number().finite().optional(),
     deltaY: z.number().finite().optional(),
+    // CDP değiştirici maskesi: Alt=1, Ctrl=2, Meta=4, Shift=8.
+    modifiers: z.number().int().min(0).max(15).optional(),
+    // Hareket sırasında BASILI olan düğmeler (sol=1, sağ=2, orta=4). Bu
+    // olmadan sürükleme çalışmıyor: Chrome tuşu bırakılmış sayıyor, metin
+    // seçilemiyor ve kaydırma çubukları taşınamıyordu.
+    buttons: z.number().int().min(0).max(31).optional(),
+    // Çift tıkla kelime, üç tıkla paragraf seçilir — sayı bunu taşır.
+    clickCount: z.number().int().min(1).max(3).optional(),
   }),
 
   z.object({
@@ -119,6 +127,7 @@ export const BrowserClientMessageSchema = z.discriminatedUnion('type', [
     code: z.string().max(32).optional(),
     text: z.string().max(8).optional(),
     keyCode: z.number().int().min(0).max(255).optional(),
+    modifiers: z.number().int().min(0).max(15).optional(),
   }),
 ]);
 export type BrowserClientMessage = z.infer<typeof BrowserClientMessageSchema>;
