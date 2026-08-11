@@ -1143,18 +1143,40 @@ try {
       );
 
       /**
-       * ÖNKOŞUL: iki sekme de bellekte AYNI jetonu tutmalı.
+       * ÖNKOŞUL: iki sekme de bellekte AYNI jetonu tutmalı — yoksa yarış
+       * oluşmaz, biri diğerinin sonucunu devralır ve test hiçbir şey ölçmez.
        *
-       * t2 açılışta jetonu döndürüyor; t1'in belleğindeki kopya bayatlıyor ve
-       * t1 yenilemeye çalışınca ağa hiç çıkmadan diğerinin sonucunu devralıyor.
-       * O hâlde yarış oluşmuyordu — testin ilk iki sürümü kilit kapalıyken de
-       * geçiyordu, yani hiçbir şey ölçmüyordu. Önce hizalıyoruz.
+       * Hizalama SIRASI önemli: devralan sekme depoya yazmaz, güncel olan
+       * yazar. Önce bayat olanı çağırırsak o devralır, ardından güncel olan
+       * yeniden yazıp tekrar öne geçer — iki sekme sonsuza kadar birbirini
+       * kovalar. Ayrı bir sondada 25 turun 25'i böyle geçti; bu testte de
+       * CI'da "sekmeler farklı jeton tutuyor" diye düştü.
+       *
+       * Önce GÜNCEL olanı döndürüyoruz, sonra diğeri devralıyor. Yazının
+       * sekmeler arasına ulaşması asenkron olduğu için birkaç deneme hakkı
+       * bırakıyoruz.
        */
-      await t1.evaluate(() => (globalThis as any).__auth.refresh());
-      const [x1, x2] = await Promise.all([
-        t1.evaluate(() => (globalThis as any).__auth.current()),
-        t2.evaluate(() => (globalThis as any).__auth.current()),
-      ]);
+      const cur = (p: Page) => p.evaluate(() => (globalThis as any).__auth.current() as string);
+      const yenile = (p: Page) => p.evaluate(() => (globalThis as any).__auth.refresh());
+
+      // Başlangıcı şansa bırakmıyoruz: t1'i döndürüp GÜNCEL hâle getiriyoruz.
+      // Hangi sekmenin güncel olduğu t2'nin açılıştaki yenilemesinin bitip
+      // bitmediğine bağlıydı; CI'da tam bu belirsizlik testi düşürdü.
+      await yenile(t1);
+      await sleep(250);
+
+      let x1 = await cur(t1);
+      let x2 = await cur(t2);
+      for (let deneme = 0; deneme < 3 && x1 !== x2; deneme++) {
+        const depo = await t1.evaluate(() => localStorage.getItem('refreshToken'));
+        const guncel = x1 === depo ? t1 : t2;
+        const bayat = guncel === t1 ? t2 : t1;
+        await yenile(guncel);
+        await sleep(250);       // yazının diğer sekmeye ulaşmasına zaman tanı
+        await yenile(bayat);
+        x1 = await cur(t1);
+        x2 = await cur(t2);
+      }
       assert(x1 && x1 === x2, `önkoşul tutmadı, sekmeler farklı jeton tutuyor: ${x1} / ${x2}`);
 
       // Şimdi ikisi de aynı jetonu sunmak üzere aynı anda koşuyor.
