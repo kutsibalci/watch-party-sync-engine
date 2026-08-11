@@ -261,31 +261,61 @@ input::placeholder { color: var(--text-faint); }
 }
 
 /**
- * Sahne pencereye SIĞAR; sayfa kaymaz.
+ * Oda ekranı pencereye SIĞAR; sayfa hiç kaymaz.
  *
- * Sahne, sütun ne kadar genişse o kadar geniş olup 16:9'dan yüksekliğini
- * alıyordu. 1500 piksellik sütunda bu 626 piksel eder ve sayfa 179 piksel
- * taşardı: kullanıcı kaydırınca adres çubuğu ve geri/ileri düğmeleri ekranın
- * dışında kalıyordu — "geri ileri tuşlarını da görelim" şikâyeti buydu.
+ * İki kusuru birden kapatıyor:
  *
- * Yüksekliği pencereden hesaplayıp genişliği ona göre kısıyoruz. Oran korunur,
- * sahne ortalanır, çubuklar hep görünür kalır.
+ * 1. Sahne, sütun ne kadar genişse o kadar geniş olup yüksekliğini 16:9'dan
+ *    alıyordu. 1500 piksellik sütunda bu 626 piksel eder; sayfa 179 piksel
+ *    taşar ve kullanıcı kaydırınca adres çubuğu ile geri/ileri düğmeleri
+ *    ekranın dışında kalırdı.
+ *
+ * 2. İlk çözümde sahne dışındaki yüksekliği SABİT bir sayı olarak tahmin
+ *    ediyordum. Tahmin, içerik değişince tutmuyordu: yükleme çubuğu belirince
+ *    sütun 14 piksel uzuyor, sayfa taşıyor, dikey kaydırma çubuğu gelip
+ *    gidiyor ve sahne her seferinde bir büyüyüp bir küçülüyordu — "titriyor"
+ *    dedirten şey buydu.
+ *
+ * Artık tahmin yok: ekran tam pencere yüksekliğinde bir sütun, sahne de
+ * artan yeri alan esnek eleman. Bir çubuk belirse bile sayfa taşmaz, sahne
+ * 2 piksel kısalır ve biter.
  */
 @media (min-width: 1001px) {
-  .stage-col > .stage {
-    /*
-     * Sahne dışındaki her şey: üst çubuk 61 + dolgu 18/24 + linkbar 54 +
-     * kontroller 70 + medya çubuğu 66 + üç boşluk 36 = 329. Birkaç piksel pay
-     * bırakıyoruz: eksik hesap sayfayı kaydırılır yapıyor ve araç çubuğu
-     * ekrandan çıkıyor — fazla pay yalnızca sahneyi bir tık küçültür.
-     */
-    --stage-chrome: 336px;
-    width: min(100%, calc(max(100vh - var(--stage-chrome), 260px) * 16 / 9));
-    width: min(100%, calc(max(100dvh - var(--stage-chrome), 260px) * 16 / 9));
-    margin-inline: auto;
+  #screen-room {
+    height: 100vh;
+    height: 100dvh;
+    display: flex; flex-direction: column; overflow: hidden;
   }
-  /* Ortak tarayıcı modunda oynat/duraklat şeridi gizleniyor; yer açılıyor. */
-  .browser-mode .stage-col > .stage { --stage-chrome: 256px; }
+  #screen-room > .topbar { flex: none; }
+  #screen-room > .room {
+    flex: 1 1 auto; min-height: 0;
+    /* `margin: 0 auto` esnek elemanın çapraz eksende UZAMASINI engelliyor:
+       oda içerik genişliğine düşüp 1112 pikselden 992'ye iniyordu. */
+    width: 100%;
+    /* Izgara satırı varsayılan olarak İÇERİĞE göre boylanır ve `align-items:
+       start` sütunları da içeriğe hapseder; ikisi birlikte sahneye yükseklik
+       bırakmıyordu. Satır kutuyu doldursun, sütunlar satıra uzasın. */
+    grid-template-rows: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .stage-col { min-height: 0; }
+  #screen-room .stage-col > .stage {
+    /* `1 1 0` şart: `auto` tabanla yükseklik içerikten gelir, içerik de
+       mutlak konumlu katmanlardan ibaret olduğu için sahne sıfıra çöker. */
+    /* `1 1 0` şart: `auto` tabanla yükseklik içerikten gelir, içerik de
+       mutlak konumlu katmanlardan ibaret olduğu için sahne sıfıra çöker. */
+    flex: 1 1 0;
+    min-height: 0;
+    /* Varsayılan `align-self: stretch` elemanı sütun genişliğine uzatır ve
+       `aspect-ratio`yu yok sayar; sahne 1112x447 olup yanlarda 160'ar piksel
+       siyah bırakıyordu. Uzamayı kapatınca genişlik yükseklikten türüyor. */
+    align-self: center;
+    width: auto; max-width: 100%;
+  }
+
+  /* Yan panel de aynı kutuya sığsın; kendi içinde kayar. */
+  #screen-room .side { height: 100%; min-height: 0; position: static; top: auto; }
 }
 #player, #player iframe, #video { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 #video { background: #000; object-fit: contain; }
@@ -625,12 +655,11 @@ input::placeholder { color: var(--text-faint); }
   width: 100vw; height: 100vh; box-sizing: border-box;
   padding: 12px; gap: 10px; background: var(--bg);
 }
-/* Seçici, yukarıdaki `.stage-col > .stage` genişlik kuralını yenecek kadar
-   belirgin olmalı; aksi halde tam ekranda sahne yine sütun genişliğinde kalır. */
-.stage-col:fullscreen > .stage {
-  aspect-ratio: auto; width: 100%; max-height: none;
-  flex: 1 1 auto; min-height: 0; border-radius: var(--r);
-}
+/* Boyutlandırmayı yukarıdaki esnek kural zaten doğru yapıyor: sahne artan
+   yeri alır, genişliği 16:9'dan türer. Buraya `aspect-ratio: auto` yazmak
+   tam ekranda genişliği sıfıra düşürüyordu — kutu ne yükseklikten ne
+   içerikten genişlik türetebiliyordu. */
+.stage-col:fullscreen > .stage { border-radius: var(--r); }
 
 /* Ortak tarayıcı gezinme düğmeleri */
 .nav-buttons { display: flex; gap: 2px; flex: none; }
@@ -642,8 +671,13 @@ input::placeholder { color: var(--text-faint); }
    "tarayıcının geri tuşu yok" gibi görünüyordu. Soluk ama duruyor. */
 .nav-buttons .btn-icon:disabled { opacity: .35; cursor: not-allowed; }
 
-/* Yükleniyor çubuğu — sayfanın açıldığını görmek gerekiyor. */
-.bw-progress { height: 2px; background: var(--line); border-radius: 2px; overflow: hidden; }
+/* Yükleniyor çubuğu — sayfanın açıldığını görmek gerekiyor.
+   Sahnenin üstünde yüzer: akışta yer kaplasaydı belirip kaybolması
+   yerleşimi oynatırdı. */
+.bw-progress {
+  position: absolute; inset: 0 0 auto 0; z-index: 6;
+  height: 3px; background: rgba(255, 255, 255, .12); overflow: hidden;
+}
 .bw-progress > span {
   display: block; height: 100%; width: 35%; border-radius: 2px;
   background: linear-gradient(90deg, var(--accent), var(--accent-2));

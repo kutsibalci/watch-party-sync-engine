@@ -258,10 +258,13 @@
         </div>
         <button id="btn-source" class="btn btn-quiet btn-sm">Diğer kaynaklar</button>
       </div>
-      <div id="bw-progress" class="bw-progress is-hidden"><span></span></div>
       <p id="browser-hint" class="muted small linkbar-hint"></p>
 
       <div class="stage">
+        <!-- Yükleme çubuğu sahnenin ÜSTÜNE biner: akışta durduğunda belirip
+             kaybolması sütunu uzatıp kısaltıyor, sayfa taşıyor ve sahne
+             titriyordu. Gerçek tarayıcılar da bunu sayfanın üstüne çizer. -->
+        <div id="bw-progress" class="bw-progress is-hidden"><span></span></div>
         <div id="player"></div>
         <video id="video" playsinline hidden></video>
         <video id="screen-view" playsinline autoplay hidden></video>

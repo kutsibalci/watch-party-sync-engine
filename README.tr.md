@@ -5,7 +5,7 @@
 [![CI](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/Node-24-3c873a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Test](https://img.shields.io/badge/test-93%20senaryo-3ecf8e)
+![Test](https://img.shields.io/badge/test-94%20senaryo-3ecf8e)
 
 Arkadaşlarınla aynı anda video izlemeyi sağlayan gerçek zamanlı senkron motoru:
 YouTube, kendi yüklediğin videolar, ekran paylaşımı ya da sunucuda açılan
@@ -20,7 +20,7 @@ yatay ölçeklenebilir WebSocket katmanı.
 > zamanlı sistemler, asenkron iş işleme ve yatay ölçeklemeyi **ölçülmüş
 > sonuçlarla** göstermek.
 
-**Durum:** Faz 0–6 tamamlandı · **93 otomatik test** (gerçek Chrome testi dahil) ·
+**Durum:** Faz 0–6 tamamlandı · **94 otomatik test** (gerçek Chrome testi dahil) ·
 tip kontrolü temiz · üretim imajı root olmayan kullanıcıyla çalışıyor
 
 <p align="center">
@@ -208,10 +208,10 @@ npm run smoke           # 13 · sağlık, auth, hata yolları, güvenlik davran�
 npm run sync-test       # 25 · senkron motoru, saat, versiyon, bilet, host devri
 npm run pipeline-test   # 14 · kuyruk mekanizmaları + gerçek ffmpeg transkodu
 npm run scale-test      # 12 · iki instance arası tutarlılık
-npm run browser-test    # 29 · gerçek Chrome, iki sekme (HEADLESS=0 ile izle)
+npm run browser-test    # 30 · gerçek Chrome, iki sekme (HEADLESS=0 ile izle)
 ```
 
-Toplam **93 senaryo**, hepsi CI'da da koşuyor.
+Toplam **94 senaryo**, hepsi CI'da da koşuyor.
 
 Testler yalnızca "çalışıyor mu"yu değil **güvenlik davranışını** da doğruluyor:
 parola özeti sızıyor mu, kullanıcı numaralandırma mesajları aynı mı, bilet

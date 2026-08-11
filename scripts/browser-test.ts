@@ -708,6 +708,7 @@ try {
   if (!browserSvc) {
     skip('Ortak tarayıcı iki sekmede de çiziliyor', 'servis çalışmıyor (npm run dev:browser)');
     skip('Kareler tam çözünürlükte geliyor', 'servis çalışmıyor');
+    skip('Yükleme çubuğu belirince sahne oynamıyor', 'servis çalışmıyor');
     skip('Kaydırırken kare hızı ve kare boyutu makul', 'servis çalışmıyor');
     skip('İkinci oda açılınca birinci odanın görüntüsü donmuyor', 'servis çalışmıyor');
     skip('Ortak tarayıcıyı yalnızca oda kurucusu sürüyor', 'servis çalışmıyor');
@@ -742,6 +743,48 @@ try {
       });
       assert(d.w >= 1280 && d.h >= 720, `kare küçültülerek geliyor: ${d.w}x${d.h}`);
       return `${d.w}×${d.h}`;
+    });
+
+    /**
+     * "Arada büyüyüp küçülüyor, titrer gibi" şikâyeti.
+     *
+     * Yükleme çubuğu sütunun akışındaydı: her sayfa yüklenişinde belirip
+     * kayboluyor, sütunu 14 piksel uzatıyordu. Sahne yüksekliği sabit bir
+     * tahminle hesaplandığı için bu kadarı sayfayı taşırmaya yetiyor, dikey
+     * kaydırma çubuğu gelip gidiyor, sütun daralıp genişliyor ve sahne her
+     * yüklemede bir büyüyüp bir küçülüyordu.
+     *
+     * Artık çubuk sahnenin ÜSTÜNE biniyor ve oda ekranı pencereye sığan bir
+     * esnek sütun — tahmin yok, taşma yok.
+     */
+    await check('Yükleme çubuğu belirince sahne oynamıyor', async () => {
+      // Adlandırılmış iç fonksiyon YOK: tsx (esbuild) onu `__name(...)` ile
+      // sarmalıyor ve o yardımcı sayfa bağlamında bulunmuyor.
+      const m = await pageA.evaluate(() => {
+        const stage = document.querySelector('.stage') as HTMLElement;
+        const bar = document.getElementById('bw-progress') as HTMLElement;
+        const olc = [];
+        // Her ölçüm getBoundingClientRect okuduğu için yerleşim zorlanır.
+        olc.push({ ...stage.getBoundingClientRect().toJSON(), tasma: document.documentElement.scrollHeight - window.innerHeight });
+        bar.classList.remove('is-hidden');
+        olc.push({ ...stage.getBoundingClientRect().toJSON(), tasma: document.documentElement.scrollHeight - window.innerHeight });
+        bar.classList.add('is-hidden');
+        olc.push({ ...stage.getBoundingClientRect().toJSON(), tasma: document.documentElement.scrollHeight - window.innerHeight });
+        return olc.map((o) => ({ w: Math.round(o.width), h: Math.round(o.height), tasma: o.tasma }));
+      });
+      const [once, during, after] = m as [typeof m[0], typeof m[0], typeof m[0]];
+
+      assert(once.tasma <= 0, `oda ekranı pencereye sığmıyor: ${once.tasma}px taşma`);
+      assert(
+        once.w === during.w && once.h === during.h,
+        `çubuk sahneyi oynattı: ${once.w}x${once.h} → ${during.w}x${during.h}`,
+      );
+      assert(during.tasma <= 0, `çubuk sayfayı taşırdı: ${during.tasma}px`);
+      assert(
+        after.w === once.w && after.h === once.h,
+        `çubuk kapanınca sahne geri gelmedi: ${after.w}x${after.h}`,
+      );
+      return `${once.w}×${once.h} sabit, taşma yok`;
     });
 
     /**
