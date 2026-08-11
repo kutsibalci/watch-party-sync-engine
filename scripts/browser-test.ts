@@ -1138,7 +1138,18 @@ try {
         t1.evaluate(() => (globalThis as any).__auth.refresh()),
         t2.evaluate(() => (globalThis as any).__auth.refresh()),
       ]);
-      assert(r1 === true && r2 === true, `yenileme başarısız: t1=${r1} t2=${r2}`);
+      if (r1 !== true || r2 !== true) {
+        // Yalnızca true/false yazmak hatayı açıklamıyordu: ağa mı çıkıldı,
+        // sunucu ne dedi, kilit var mıydı — hepsi lazım.
+        const detay = await Promise.all([
+          t1.evaluate(() => JSON.stringify((globalThis as any).__auth.last())),
+          t2.evaluate(() => JSON.stringify((globalThis as any).__auth.last())),
+          t1.evaluate(() => (globalThis as any).__auth.hasLocks()),
+        ]);
+        throw new Error(
+          `yenileme başarısız: t1=${r1} t2=${r2} · t1 ${detay[0]} · t2 ${detay[1]} · webLocks=${detay[2]}`,
+        );
+      }
 
       // Asıl sinyal BU. Aile iptal edilse bile eldeki erişim jetonu 15 dakika
       // daha geçerli kalır — `/api/auth/me` sorup "ayakta" demek yanıltıcıydı.

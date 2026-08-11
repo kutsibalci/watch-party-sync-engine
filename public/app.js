@@ -91,24 +91,42 @@ function scheduleRefresh(expiresIn) {
   refreshTimer = setTimeout(() => void refreshSession(), Math.max(30_000, (expiresIn - 60) * 1000));
 }
 
+/**
+ * Son yenilemenin ne yaptığı — teşhis için.
+ *
+ * Yalnızca true/false döndürmek bir hatayı açıklamaya yetmiyordu: CI'da
+ * senaryo "yenileme başarısız" deyip duruyor, ama ağa mı çıkıldı, sunucu ne
+ * dedi, yoksa başka sekmenin sonucu mu devralındı belli olmuyordu.
+ */
+let lastRefresh = null;
+
 async function postRefresh() {
+  const sent = refreshToken;
   const res = await fetch(`${API}/api/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken }),
+    body: JSON.stringify({ refreshToken: sent }),
   }).catch(() => null);
 
   // Ağ hatası oturumu SİLMEZ: internet bir saniye gidip geldiğinde kullanıcıyı
   // çıkışa atmanın anlamı yok, bir sonraki denemede yenilenir.
-  if (!res) return false;
+  if (!res) {
+    lastRefresh = { yol: 'post', durum: 'ag-hatasi' };
+    return false;
+  }
   if (!res.ok) {
+    lastRefresh = { yol: 'post', durum: res.status, gonderilen: sent.slice(0, 6) };
     clearSession();
     return false;
   }
   const json = await res.json().catch(() => null);
-  if (!json?.accessToken) return false;
+  if (!json?.accessToken) {
+    lastRefresh = { yol: 'post', durum: 'govde-bos' };
+    return false;
+  }
   me = json.user ?? me;
   saveSession(json);
+  lastRefresh = { yol: 'post', durum: 200, gonderilen: sent.slice(0, 6), alinan: json.refreshToken.slice(0, 6) };
   return true;
 }
 
@@ -132,6 +150,7 @@ function refreshSession() {
       // Başka sekme bizden önce yenilemiş; onun sonucunu kullan.
       refreshToken = stored;
       token = localStorage.getItem('token') || '';
+      lastRefresh = { yol: 'devral', durum: token ? 'tamam' : 'jeton-yok' };
       return Boolean(token);
     }
     return postRefresh();
@@ -140,7 +159,10 @@ function refreshSession() {
   refreshInFlight = (navigator.locks
     ? navigator.locks.request('watchparty-auth-refresh', run)
     : run()
-  ).catch(() => false).finally(() => { refreshInFlight = null; });
+  ).catch((e) => {
+    lastRefresh = { yol: 'istisna', durum: String(e?.name ?? e) };
+    return false;
+  }).finally(() => { refreshInFlight = null; });
 
   return refreshInFlight;
 }
@@ -158,6 +180,8 @@ globalThis.__auth = {
   refresh: () => refreshSession(),
   hasSession: () => Boolean(localStorage.getItem('refreshToken')),
   current: () => refreshToken,
+  last: () => lastRefresh,
+  hasLocks: () => Boolean(navigator.locks),
 };
 
 // ──────────────────────────────────────────────────────────── Yardımcılar
