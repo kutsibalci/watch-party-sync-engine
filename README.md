@@ -5,7 +5,7 @@
 [![CI](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/Node-24-3c873a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Test](https://img.shields.io/badge/tests-94%20scenarios-3ecf8e)
+![Test](https://img.shields.io/badge/tests-103%20scenarios-3ecf8e)
 
 A real-time synchronisation engine for watching video together: YouTube, your own
 uploads, a shared screen, or a browser that runs on the server and everyone drives
@@ -20,7 +20,7 @@ and on YouTube. That is a deliberate scope decision; the reasoning is
 > stateful real-time systems, asynchronous job processing and horizontal scaling
 > **with measured results**.
 
-**Status:** phases 0–6 complete · **94 automated tests** (including a real Chrome test) ·
+**Status:** phases 0–6 complete · **103 automated tests** (including a real Chrome test) ·
 type-check clean · production image runs as a non-root user
 
 <p align="center">
@@ -68,7 +68,7 @@ npm run infra:up      # postgres, redis, minio, prometheus, grafana
 npm run migrate
 npm run dev           # api + realtime + worker
 
-npm run smoke         # 13 tests — is everything connected?
+npm run smoke         # 20 tests — is everything connected?
 ```
 
 In the browser go to **http://127.0.0.1:8090/app/** →
@@ -208,14 +208,14 @@ workers claim simultaneously and exactly one wins**.
 
 ```bash
 npm run typecheck       # tsc, two configurations
-npm run smoke           # 13 · health, auth, error paths, security behaviour
+npm run smoke           # 20 · health, auth, error paths, security behaviour
 npm run sync-test       # 25 · sync engine, clock, versioning, tickets, host handover
 npm run pipeline-test   # 14 · queue mechanics + a real ffmpeg transcode
 npm run scale-test      # 12 · consistency across two instances
-npm run browser-test    # 30 · real Chrome, two tabs (watch it with HEADLESS=0)
+npm run browser-test    # 32 · real Chrome, two tabs (watch it with HEADLESS=0)
 ```
 
-**94 scenarios** in total, all of them running in CI as well.
+**103 scenarios** in total, all of them running in CI as well.
 
 The tests check more than "does it work" — they check **security behaviour**: whether
 the password hash leaks, whether the user-enumeration messages are identical, whether
@@ -281,7 +281,8 @@ added that makes a silent hang impossible — **a silent hang is worse than a fa
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/healthz` · `/readyz` · `/metrics` | liveness and readiness are separate |
-| `POST` | `/api/auth/register` · `/login` | |
+| `POST` | `/api/auth/register` · `/login` | returns an access token and a refresh token |
+| `POST` | `/api/auth/refresh` · `/logout` | rotating token; needs no access token |
 | `GET` | `/api/auth/me` | |
 | `POST` | `/api/rooms` · `/:slug/join` · `/:slug/ticket` | |
 | `PATCH` | `/api/rooms/:slug/video` | switches the room's source to an HLS video |
@@ -543,6 +544,16 @@ scripts/   migration tool + four test suites
   background tab's compositor stops: without these, **opening a second room froze the
   first room's picture** (measured: 0 frames for 42 scroll events; 17 frames with the
   fix). The defect was invisible while testing a single room.
+- The refresh token lives in **localStorage**. In production the right home is an
+  `httpOnly` cookie: if XSS can read the access token it can read the refresh token
+  too and extend the session indefinitely. A cookie was not chosen because realtime
+  and the shared browser sit on separate ports and both authenticate with tickets, so
+  the cookie would only cover the API — too small a gain for the complexity it adds
+  here. In exchange the token **rotates**, is stored hashed, and can be revoked.
+- Reuse detection **can log the legitimate user out too**: when the same token is
+  presented twice there is no way to tell which copy is stolen, so the whole family is
+  closed. A network-level retry is enough to trigger it. That is why the client
+  serialises refreshes both within a tab and across tabs (Web Locks).
 - The load test hits its own bottleneck past 2,500 VUs in a single k6 container —
   going higher needs multiple generators.
 
