@@ -391,6 +391,8 @@ globalThis.__player = {
   seek: (ms) => player?.seek(ms),
   position: () => pos(),
   playing: () => Boolean(player?.isPlaying?.()),
+  /** Saniye cinsinden süre; atlama testinin videoya sığıp sığmadığını bilmesi için. */
+  duration: () => (ytReady ? (ytPlayer.getDuration?.() ?? 0) : ($('video').duration || 0)),
 };
 
 /**

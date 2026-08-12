@@ -561,13 +561,51 @@ try {
       { timeout: 15_000, polling: 250 })
       .then(() => true).catch(() => false);
 
+  /**
+   * Ortam videoyu GERÇEKTEN oynatabiliyor mu?
+   *
+   * CI'ın veri merkezi IP'sinde YouTube akışı gelmiyor: oynatıcı kuruluyor,
+   * video verisi yükleniyor, ama durum HİÇ BAŞLAMAMIŞ'ta kalıyor. Bu tam da
+   * düzelttiğimiz kusurun belirtisiyle aynı görünüyor ve testi yanlış yere
+   * kırmızı yaktı. Aşağıdaki üç senaryo da oynatabilen bir ortam istiyor;
+   * bir kez ölçüp üçünde de kullanıyoruz.
+   */
+  let ortamOynatiyor = false;
+  if (youtubeReady && await oynaticiHazir(pageA)) {
+    await click(pageA, '#btn-play');
+    ortamOynatiyor = await pageA.waitForFunction(
+      () => (globalThis as any).__stage().hizalandi === true,
+      { timeout: 15_000, polling: 200 },
+    ).then(() => true).catch(() => false);
+  }
+  const ORTAM_YOK = 'ortam videoyu oynatmıyor (CI / veri merkezi IP\'si)';
+
   await check('Duraklamış odada oynatıcı siyah kalmıyor (kapak durumu)', async () => {
-    if (!youtubeReady) throw new SkipError('YouTube oynatıcısı bu ortamda hazır değil');
-    if (!await oynaticiHazir(pageA)) throw new SkipError('oynatıcı hazır olmadı (dış kaynak)');
+    if (!ortamOynatiyor) throw new SkipError(ORTAM_YOK);
+
+    // Kusur MOUNT yolundaydı: duraklamış bir odaya video konduğunda.
+    await click(pageA, '#btn-pause');
+    await sleep(600);
+    await pageA.$eval('#stage-url', (el) => {
+      // Kimlik iki koşulu birden sağlamalı: kapak senaryosunun kullandığından
+      // FARKLI (aynısı olursa video zaten yüklü kalır ve o senaryo kapağı hiç
+      // görmez) ve atlama senaryosuna yetecek kadar UZUN (19 saniyelik bir
+      // videoda +40 sn süre dışına düşüyordu).
+      (el as HTMLInputElement).value = 'https://youtu.be/M7lc1UVf-VE';
+    });
+    await click(pageA, '#btn-stage-url');
+
+    // -1 = UNSTARTED: kapkara ekran. 5 = CUED (kapak görünür), 2 = duraklı.
+    const kapakGeldi = await pageA.waitForFunction(
+      () => {
+        const s = (globalThis as any).__stage();
+        return s.ytVideoId === 'M7lc1UVf-VE' && s.ytState !== -1;
+      },
+      { timeout: 20_000, polling: 250 },
+    ).then(() => true).catch(() => false);
+
     const s = await pageA.evaluate(() => (globalThis as any).__stage());
-    assert(s.ytVideoId, `oynatıcıya video yüklenmemiş: ${JSON.stringify(s)}`);
-    // -1 = UNSTARTED: kapkara ekran. 5 = CUED, 1/2/3 = oynuyor/duraklı/yükleniyor.
-    assert(s.ytState !== -1, `oynatıcı hiç başlamamış durumda kaldı (-1): ${JSON.stringify(s)}`);
+    assert(kapakGeldi, `oynatıcı hiç başlamamış durumda kaldı: ${JSON.stringify(s)}`);
     return `durum ${s.ytState}, video ${s.ytVideoId}`;
   });
 
@@ -579,8 +617,7 @@ try {
    * Artık oynatıcıdan gelen değişiklik odaya komut olarak yayılıyor.
    */
   await check('Oynatıcının kendi duraklatması odaya yayılıyor', async () => {
-    if (!youtubeReady) throw new SkipError('YouTube oynatıcısı bu ortamda hazır değil');
-    if (!await oynaticiHazir(pageA)) throw new SkipError('oynatıcı hazır olmadı (dış kaynak)');
+    if (!ortamOynatiyor) throw new SkipError(ORTAM_YOK);
 
     await click(pageA, '#btn-play');
     // Oynadığını görmek yetmiyor: UYGULAMANIN oynadığını fark etmesini de
@@ -611,14 +648,18 @@ try {
   });
 
   await check('Oynatıcıdan atlama odaya yayılıyor', async () => {
-    if (!youtubeReady) throw new SkipError('YouTube oynatıcısı bu ortamda hazır değil');
-    if (!await oynaticiHazir(pageA)) throw new SkipError('oynatıcı hazır olmadı (dış kaynak)');
+    if (!ortamOynatiyor) throw new SkipError(ORTAM_YOK);
 
     // Telemetri hücresi "0:12.345" biçiminde; `parseMs` "123 ms" bekliyor ve
     // NaN döndürüyordu. Sayıyı kancadan ham olarak alıyoruz.
     const hedef = (p: Page) => p.evaluate(() => (globalThis as any).__sync()?.targetMs as number | null);
     const hedefOnce = await hedef(pageB);
     assert(typeof hedefOnce === 'number', 'B hedef pozisyonu okunamadı');
+
+    // 40 saniye ileri atlamak videonun içine düşmeli. Kısa bir videoda YouTube
+    // sonu geçen atlamayı kırpıyor ve senaryo, ürün kusuru yokken düşüyordu.
+    const sure = await pageA.evaluate(() => (globalThis as any).__player.duration() as number);
+    if (!(sure > 60)) throw new SkipError(`video atlamaya elverecek kadar uzun değil (${Math.round(sure)} sn)`);
 
     await pageA.evaluate(() => {
       const p = (globalThis as any).__player;
@@ -726,7 +767,7 @@ try {
    * kurup kapağın HİÇ görünüp görünmediğini kaydediyoruz.
    */
   await check('YouTube linki yapıştırılır yapıştırılmaz kapak geliyor', async () => {
-    const VID = 'M7lc1UVf-VE';
+    const VID = 'aqz-KE-bpKQ';
 
     // Dikkat: evaluate içinde ADLANDIRILMIŞ fonksiyon tanımlamayın. tsx (esbuild)
     // isim korumak için `__name(...)` sarmalıyor; o yardımcı sayfa bağlamında
@@ -749,7 +790,7 @@ try {
     await Promise.all([watchPoster(pageA), watchPoster(pageB)]);
 
     await pageA.$eval('#stage-url', (el) => {
-      (el as HTMLInputElement).value = 'https://youtu.be/M7lc1UVf-VE';
+      (el as HTMLInputElement).value = 'https://youtu.be/aqz-KE-bpKQ';
     });
     await click(pageA, '#btn-stage-url');
 
