@@ -767,7 +767,11 @@ try {
    * kurup kapağın HİÇ görünüp görünmediğini kaydediyoruz.
    */
   await check('YouTube linki yapıştırılır yapıştırılmaz kapak geliyor', async () => {
-    const VID = 'aqz-KE-bpKQ';
+    // Kimlik ÜÇÜNCÜ olmalı: odanın ilk videosu (aqz-KE-bpKQ) ve kapak
+    // senaryosunun kullandığı (M7lc1UVf-VE) dışında. Odanın ilk videosunu
+    // seçmek testi önceki senaryoların koşmasına bağlıyordu: CI'da onlar
+    // atlanınca video zaten yüklü kalıyor ve kapak hiç gösterilmiyordu.
+    const VID = 'jNQXAC9IVRw';
 
     // Dikkat: evaluate içinde ADLANDIRILMIŞ fonksiyon tanımlamayın. tsx (esbuild)
     // isim korumak için `__name(...)` sarmalıyor; o yardımcı sayfa bağlamında
@@ -790,7 +794,7 @@ try {
     await Promise.all([watchPoster(pageA), watchPoster(pageB)]);
 
     await pageA.$eval('#stage-url', (el) => {
-      (el as HTMLInputElement).value = 'https://youtu.be/aqz-KE-bpKQ';
+      (el as HTMLInputElement).value = 'https://youtu.be/jNQXAC9IVRw';
     });
     await click(pageA, '#btn-stage-url');
 
