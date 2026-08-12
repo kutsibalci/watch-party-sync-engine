@@ -360,7 +360,38 @@ globalThis.__stage = () => ({
   videoMuted: $('video').muted,
   screenMuted: $('screen-view').muted,
   ytMuted: ytReady ? Boolean(ytPlayer.isMuted?.()) : null,
+  ytReady,
+  // Oynatıcı hangi videoyu yüklü sanıyor ve hangi durumda? Sahne siyah
+  // kaldığında ilk sorulacak soru bu.
+  ytVideoId: ytReady ? (ytPlayer.getVideoData?.()?.video_id ?? null) : null,
+  ytState: ytReady ? (ytPlayer.getPlayerState?.() ?? null) : null,
+  /**
+   * Oynatıcının oda durumuna uyduğunu GÖRDÜĞÜMÜZ son değer.
+   *
+   * Kullanıcı niyetini bundan çıkarıyoruz, dolayısıyla testin "oynatıcıya
+   * dokunmadan önce uygulama oynamayı fark etti mi" sorusunun cevabı da bu.
+   * Tik 250 ms'de bir çalışıyor; bunu beklemeden duraklatmak, insan hızında
+   * hiç yaşanmayacak bir yarışı testte üretiyordu.
+   */
+  hizalandi: sonUygulanan,
 });
+
+/**
+ * Oynatıcıya DOĞRUDAN dokunma kancası — testte "kullanıcı oynatıcının kendi
+ * kontrolünü kullandı" durumunu üretmenin tek yolu.
+ *
+ * Düğmelerimizi tıklamak aynı şey değil: onlar komutu odaya yollar. Burada
+ * yalnızca oynatıcıyı oynatıp durduruyoruz; odaya yayılması gerekiyorsa bunu
+ * denetim tiki fark etmeli. Programatik işaret KOYMUYORUZ, çünkü kullanıcı da
+ * koymaz.
+ */
+globalThis.__player = {
+  play: () => player?.play(),
+  pause: () => player?.pause(),
+  seek: (ms) => player?.seek(ms),
+  position: () => pos(),
+  playing: () => Boolean(player?.isPlaying?.()),
+};
 
 /**
  * Seçilen videonun kapak fotoğrafı.
@@ -412,11 +443,19 @@ function warnIfYouTubeStalls() {
 
 /** Yollanmış ama sunucudan henüz geri dönmemiş YouTube kimliği. */
 let pendingYtId = null;
+/** Şu an mount edilmiş kaynağın kimliği; değişince oynatıcı durumu sıfırlanır. */
+let mountedKey = null;
 
 function mountSource(source, startAtMs, shouldPlay) {
   if (!source) return;
   // Sunucu artık bu kaynağı biliyor; iyimser niyeti bırakabiliriz.
   pendingYtId = null;
+  if (source.videoId !== mountedKey && source.url !== mountedKey) {
+    // Yeni kaynak: "oynadığını gördük mü" bilgisi sıfırlanmalı.
+    mountedKey = source.videoId ?? source.url;
+    sonUygulanan = null;
+    sonKonum = null;
+  }
 
   if (source.type === 'youtube') {
     showStage('youtube');
@@ -438,8 +477,20 @@ function mountSource(source, startAtMs, shouldPlay) {
 
     if (!ytReady) { warnIfYouTubeStalls(); return; }
     if (!loaded) {
-      ytPlayer.loadVideoById(source.videoId, startAtMs / 1000);
-      if (!shouldPlay) ytPlayer.pauseVideo();
+      /**
+       * Duraklamış odada `cueVideoById`, oynayan odada `loadVideoById`.
+       *
+       * Önceden ikisinde de `loadVideoById` çağrılıp arkasından `pauseVideo()`
+       * geliyordu. YouTube bu ikilide oynatıcıyı HİÇ BAŞLAMAMIŞ (-1) durumda
+       * bırakıyor: kapak yok, oynat düğmesi yok, sahne kapkara. Ölçtük —
+       * videoId doğru yüklenmiş ama durum saniyelerce -1'de kaldı.
+       *
+       * `cueVideoById` tam bunun için var: videoyu hazırlar, kapağını gösterir
+       * ve CUED (5) durumuna geçer.
+       */
+      atlamaCizgisiTazele = true;
+      if (shouldPlay) ytPlayer.loadVideoById(source.videoId, startAtMs / 1000);
+      else ytPlayer.cueVideoById(source.videoId, startAtMs / 1000);
     }
     return;
   }
@@ -815,6 +866,8 @@ function handleMessage(msg) {
 function applyState(next) {
   if (next.version <= seenVersion) return;
   seenVersion = next.version;
+  // Uzaktan gelen değişiklik oynatıcıyı da değiştirecek; bunu kullanıcının
+  // kendi müdahalesi sanıp odaya geri komut yollamayalım.
   state = next;
   $('t-version').textContent = String(next.version);
   mountSource(next.source, next.positionMs, next.isPlaying);
@@ -835,8 +888,64 @@ setInterval(() => {
 }, 30000);
 
 // ═══════════════════════════════════════════════════════════ Kontroller
-// Komutlar yalnızca butonlardan gider. Oynatıcının kendi olaylarını dinleyip
-// komuta çevirseydik "durum geldi → olay → komut → yayın" döngüsü oluşurdu.
+/**
+ * Komutlar hem alttaki düğmelerden hem OYNATICININ KENDİ kontrollerinden gider.
+ *
+ * Önceden yalnızca düğmeler komut üretiyordu; oynatıcının üstünde durdurmaya
+ * çalışmak işe yaramıyordu çünkü 250 ms'lik denetim tiki oda durumunu geri
+ * dayatıyordu. Kullanıcı için bu "video kilitli" demekti.
+ *
+ * Döngü tehlikesi gerçek — "durum geldi → oynatıcı değişti → komut → yayın" —
+ * ve tek bir kuralla kapatılıyor: oynatıcıya BİZ dokunduğumuzda kısa bir süre
+ * için oynatıcı-kaynaklı değişiklikleri yorumlamıyoruz. Yani ayrımı olayın
+ * kendisinden değil, onu kimin başlattığından çıkarıyoruz.
+ */
+/**
+ * Kendi çağrımızın yankısını yutmanın iki ayrı yolu var ve ikisi de zaman
+ * penceresi DEĞİL.
+ *
+ * Önce tek bir 600 ms'lik pencere denendi; iki kez ters tepti. Birincisi:
+ * sapma düzeltmesi de pencereyi ileri itiyordu ve bu makinede saat
+ * sürüklendiği için düzeltme sık çalışıp kullanıcının duraklatmasını hiç
+ * duyurmuyordu. İkincisi ölçüldü: uzaktan gelen bir duraklatmanın hemen
+ * ardından yapılan atlama pencereye denk gelirse yorumlanmıyor, sapma
+ * düzeltmesi de onu 250 ms içinde geri çekiyordu — kullanıcının atlaması
+ * sessizce yok oluyordu.
+ *
+ * Oynat/duraklat için kısa bir pencere yeterli (durum ikili, kaçırılırsa
+ * bir sonraki tikte yine görülür). Atlama için pencere YANLIŞ araç: kendi
+ * atlamamızın yankısını, ölçüm çizgisini yeni konuma taşıyarak yutuyoruz.
+ */
+/**
+ * Oynatıcıya en son DAYATTIĞIMIZ ve tuttuğunu GÖRDÜĞÜMÜZ oynatma durumu.
+ *
+ * Ayrımın anahtarı bu. Oynatıcı ile oda ayrıştığında iki ihtimal var:
+ * ya biz henüz oda durumunu oynatıcıya uygulamadık, ya da oynatıcı bizim
+ * hizaladığımız yerden kullanıcı eliyle KAYDI. İkincisi kullanıcı niyetidir.
+ *
+ * Zaman penceresiyle denendi ve iki kez ters teptiği ölçüldü: uzaktan gelen
+ * bir değişikliğin hemen ardından yapılan duraklatma da atlama da pencereye
+ * denk gelip sessizce yutuluyordu. Pencere zaten yanlış soruyu soruyor —
+ * "ne zaman oldu" değil, "kim yaptı" gerekiyor.
+ */
+let sonUygulanan = null;
+
+/**
+ * Kendi atlamamızdan sonraki İLK tikte ölçüm yapma, yalnızca çizgiyi tazele.
+ *
+ * Tek tik, çünkü YouTube istenen saniyeye değil en yakın anahtar kareye
+ * oturabiliyor; komut ettiğimiz değeri çizgi kabul etmek bu farkı kullanıcı
+ * sürüklemesi sanmaya yol açardı.
+ */
+let atlamaCizgisiTazele = false;
+
+/** Kullanıcı zaman çubuğunu sürükledi mi? Bu eşikten büyük sıçrama sürüklemedir. */
+const USER_SEEK_MS = 2500;
+let sonKonum = null;
+let sonKonumAt = 0;
+let oncekiBuffer = false;
+
+
 const pos = () => (player?.ready() ? player.positionMs() : 0);
 
 $('btn-play').onclick  = () => sendMsg({ type: 'PLAY', positionMs: pos() });
@@ -897,10 +1006,59 @@ function controlTick() {
   $('t-target').textContent = fmt(target);
   $('t-actual').textContent = fmt(actual);
 
-  if (state.isPlaying && !player.isPlaying() && !player.isBuffering()) player.play();
-  if (!state.isPlaying && player.isPlaying()) player.pause();
+  /**
+   * Sahnede video yoksa oynatıcıya KARIŞMIYORUZ.
+   *
+   * Ekran paylaşımı ya da ortak tarayıcı açıldığında video yerel olarak
+   * duraklatılıyor (sesi arkadan gelmesin diye). Niyet algısı bunu kullanıcı
+   * duraklatması sanıp odaya yayardı — hem de her istemciden ayrı ayrı. Öte
+   * yandan eski davranış da yanlıştı: zorlama, duraklatmayı 250 ms içinde geri
+   * alıyordu. Gizli katmanın sahibi senkron motoru değil.
+   */
+  const sahnedeVideo = stageLayer === 'youtube' || stageLayer === 'hls';
+  if (!sahnedeVideo) return;
 
-  if (player.isBuffering()) { setAction('arabellek', ''); return; }
+  const now = Date.now();
+  const oynuyor = player.isPlaying();
+  const bufferliyor = player.isBuffering();
+
+  // Oynatıcı odayla aynı fikirdeyse hizayı buradan öğreniyoruz. Yalnızca
+  // GÖRÜLEN uyum sayılır: `play()` çağırmış olmak oynadığı anlamına gelmez
+  // (otomatik oynatma engellenebilir) ve öyle saysaydık, hiç oynamayan bir
+  // oynatıcıyı kullanıcı duraklatmış gibi görüp odayı durdururduk.
+  if (!bufferliyor && oynuyor === state.isPlaying) sonUygulanan = state.isPlaying;
+
+  // 1) Oynatıcının kendi oynat/duraklat düğmesi kullanıldı mı?
+  //    Arabellekte "oynamıyor" görünmek duraklatma değildir; o yüzden dışarıda.
+  if (!bufferliyor && state.isPlaying !== oynuyor && sonUygulanan === state.isPlaying) {
+    sonKonum = actual; sonKonumAt = now; oncekiBuffer = bufferliyor;
+    sonUygulanan = oynuyor;   // kullanıcının bıraktığı yer yeni hizamız
+    sendMsg({ type: oynuyor ? 'PLAY' : 'PAUSE', positionMs: Math.max(0, actual) });
+    return;   // bu tikte zorlama yok; sunucudan dönecek sürümü bekliyoruz
+  }
+
+  // 2) Zaman çubuğu sürüklendi mi? Konum, geçen süreden bağımsız sıçradıysa.
+  //    Arabellekte video ilerlemez; beklenen ilerlemeyi o zaman sıfır sayıyoruz.
+  if (atlamaCizgisiTazele) {
+    atlamaCizgisiTazele = false;
+  } else if (sonKonum !== null) {
+    const beklenen = state.isPlaying && !oncekiBuffer ? now - sonKonumAt : 0;
+    const sicrama = actual - sonKonum - beklenen;
+    if (Math.abs(sicrama) > USER_SEEK_MS) {
+      sonKonum = actual; sonKonumAt = now; oncekiBuffer = bufferliyor;
+      sendMsg({ type: 'SEEK', positionMs: Math.max(0, actual) });
+      return;
+    }
+  }
+  sonKonum = actual; sonKonumAt = now; oncekiBuffer = bufferliyor;
+
+  // 3) Oda durumunu oynatıcıya dayat.
+  // Kendi çağrımız niyet sanılmaz: hizayı ancak oynatıcının GERÇEKTEN uyduğunu
+  // gördüğümüzde güncelliyoruz (yukarıda).
+  if (state.isPlaying && !oynuyor && !bufferliyor) player.play();
+  if (!state.isPlaying && oynuyor) player.pause();
+
+  if (bufferliyor) { setAction('arabellek', ''); return; }
 
   const drift = target - actual;
   $('t-drift').textContent = `${drift >= 0 ? '+' : ''}${drift.toFixed(0)} ms`;
@@ -921,6 +1079,10 @@ function applyDrift(target, actual) {
 
   if (decision.action === 'seek') {
     if (nudgeActive) { player.setRate(1); nudgeActive = false; }
+    // Kendi atlamamız: bir sonraki tikte ölçüm yapma, çizgiyi tazele.
+    // Oynat/duraklat algısına DOKUNMUYORUZ — dokunsaydık, sık düzeltme yapan
+    // bir ortamda kullanıcı oynatıcıyı hiç durduramazdı.
+    atlamaCizgisiTazele = true;
     player.seek(decision.toMs);
     setAction(`atlandı → ${fmt(decision.toMs)}`, 'drift-seek');
     return;

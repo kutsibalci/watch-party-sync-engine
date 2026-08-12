@@ -5,7 +5,7 @@
 [![CI](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/kutsibalci/watch-party-sync-engine/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/Node-24-3c873a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Test](https://img.shields.io/badge/tests-104%20scenarios-3ecf8e)
+![Test](https://img.shields.io/badge/tests-108%20scenarios-3ecf8e)
 
 A real-time synchronisation engine for watching video together: YouTube, your own
 uploads, a shared screen, or a browser that runs on the server and everyone drives
@@ -20,7 +20,7 @@ and on YouTube. That is a deliberate scope decision; the reasoning is
 > stateful real-time systems, asynchronous job processing and horizontal scaling
 > **with measured results**.
 
-**Status:** phases 0–6 complete · **104 automated tests** (including a real Chrome test) ·
+**Status:** phases 0–6 complete · **108 automated tests** (including a real Chrome test) ·
 type-check clean · production image runs as a non-root user
 
 <p align="center">
@@ -212,10 +212,10 @@ npm run smoke           # 21 · health, auth, error paths, security behaviour
 npm run sync-test       # 25 · sync engine, clock, versioning, tickets, host handover
 npm run pipeline-test   # 14 · queue mechanics + a real ffmpeg transcode
 npm run scale-test      # 12 · consistency across two instances
-npm run browser-test    # 32 · real Chrome, two tabs (watch it with HEADLESS=0)
+npm run browser-test    # 36 · real Chrome, two tabs (watch it with HEADLESS=0)
 ```
 
-**104 scenarios** in total, all of them running in CI as well.
+**108 scenarios** in total, all of them running in CI as well.
 
 The tests check more than "does it work" — they check **security behaviour**: whether
 the password hash leaks, whether the user-enumeration messages are identical, whether
@@ -519,7 +519,15 @@ scripts/   migration tool + four test suites
   something together with sound, the YouTube mode exists and runs on the sync engine.
 - The stage holds exactly one layer at a time (YouTube / your own video / screen share /
   shared browser). Pasting a YouTube link always hands the stage to the player;
-  anything else goes to the shared browser.
+  anything else goes to the shared browser. The layer being hidden is also **muted** —
+  a `hidden` `<video>` or iframe keeps playing its audio, and a user who thinks they
+  switched sources cannot tell where the leftover sound is coming from.
+- The player's **own controls drive the room** too: using the iframe's play/pause
+  button or its scrubber broadcasts the command. Telling that apart with a time window
+  backfired twice under measurement (a user action right after a remote change got
+  swallowed); instead we ask whether the player **drifted away from where we aligned
+  it**. While the stage is not showing a video, the sync engine leaves the player
+  alone entirely.
 - Only the **room creator** drives the shared browser; everyone else watches. There is
   a single tab on the server — if two people click at once, both lose. The check is
   server-side; hiding the button in the client would not be enough.

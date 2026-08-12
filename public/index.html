@@ -266,7 +266,10 @@
              titriyordu. Gerçek tarayıcılar da bunu sayfanın üstüne çizer. -->
         <div id="bw-progress" class="bw-progress is-hidden"><span></span></div>
         <div id="player"></div>
-        <video id="video" playsinline hidden></video>
+        <!-- `controls`: kendi videonda da zaman çubuğunu ve ses ayarını
+             oynatıcının üstünden kullanabilmek için. Yapılan değişiklik
+             denetim tikinde yakalanıp odaya komut olarak yayılıyor. -->
+        <video id="video" playsinline controls hidden></video>
         <video id="screen-view" playsinline autoplay hidden></video>
         <canvas id="browser-view" tabindex="0" hidden></canvas>
         <div id="stage-empty" class="stage-empty">

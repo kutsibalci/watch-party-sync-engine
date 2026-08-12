@@ -542,6 +542,118 @@ try {
     return `v${vBefore} → v${va}`;
   });
 
+  /**
+   * "Videonun resmi ekrana gelmedi" şikâyeti.
+   *
+   * Duraklamış odada `loadVideoById` çağrılıp arkasından `pauseVideo()`
+   * geliyordu; YouTube bu ikilide oynatıcıyı HİÇ BAŞLAMAMIŞ (-1) durumda
+   * bırakıyor — kapak yok, oynat düğmesi yok, sahne kapkara. Ölçüldü: videoId
+   * doğru yüklenmiş ama durum saniyelerce -1'de kaldı. Doğrusu `cueVideoById`.
+   */
+  /**
+   * `youtubeReady` yalnızca iframe'in yerleştiğini söyler; oynatıcının
+   * KULLANILABİLİR olduğunu değil. `onReady` gelmeden `ytPlayer` üzerindeki
+   * hiçbir yöntem yok — testler bu yüzden "video yüklenmemiş" ve "seekTo is
+   * not a function" diye düştü. Doğru kapı bu.
+   */
+  const oynaticiHazir = async (p: Page) =>
+    p.waitForFunction(() => (globalThis as any).__stage?.().ytReady === true,
+      { timeout: 15_000, polling: 250 })
+      .then(() => true).catch(() => false);
+
+  await check('Duraklamış odada oynatıcı siyah kalmıyor (kapak durumu)', async () => {
+    if (!youtubeReady) throw new SkipError('YouTube oynatıcısı bu ortamda hazır değil');
+    if (!await oynaticiHazir(pageA)) throw new SkipError('oynatıcı hazır olmadı (dış kaynak)');
+    const s = await pageA.evaluate(() => (globalThis as any).__stage());
+    assert(s.ytVideoId, `oynatıcıya video yüklenmemiş: ${JSON.stringify(s)}`);
+    // -1 = UNSTARTED: kapkara ekran. 5 = CUED, 1/2/3 = oynuyor/duraklı/yükleniyor.
+    assert(s.ytState !== -1, `oynatıcı hiç başlamamış durumda kaldı (-1): ${JSON.stringify(s)}`);
+    return `durum ${s.ytState}, video ${s.ytVideoId}`;
+  });
+
+  /**
+   * "Aşağıdaki butonlar haricinde de etkileşime geçebilelim."
+   *
+   * Oynatıcının kendi kontrolü kullanıldığında 250 ms'lik denetim tiki oda
+   * durumunu geri dayatıyordu; kullanıcı için video kilitli görünüyordu.
+   * Artık oynatıcıdan gelen değişiklik odaya komut olarak yayılıyor.
+   */
+  await check('Oynatıcının kendi duraklatması odaya yayılıyor', async () => {
+    if (!youtubeReady) throw new SkipError('YouTube oynatıcısı bu ortamda hazır değil');
+    if (!await oynaticiHazir(pageA)) throw new SkipError('oynatıcı hazır olmadı (dış kaynak)');
+
+    await click(pageA, '#btn-play');
+    // Oynadığını görmek yetmiyor: UYGULAMANIN oynadığını fark etmesini de
+    // beklemek gerekiyor. Kullanıcı niyeti "oynatıcı hizalandığı yerden
+    // kaydı mı" sorusundan çıkarılıyor ve hiza 250 ms'lik tikte kuruluyor.
+    // Beklemeden duraklatmak, insan hızında yaşanmayacak bir yarış üretip
+    // senaryoyu kararsız yapıyordu (üç ölçümün ikisinde kaçtı).
+    const oynadi = await pageA.waitForFunction(
+      () => (globalThis as any).__stage().hizalandi === true,
+      { timeout: 15_000, polling: 200 },
+    ).then(() => true).catch(() => false);
+    if (!oynadi) throw new SkipError('ortam videoyu oynatmıyor (CI / veri merkezi IP\'si)');
+
+    const vOnce = Number(await readCell(pageB, 't-version'));
+    // Düğmeye DEĞİL oynatıcıya dokunuyoruz: kullanıcının iframe içindeki
+    // duraklat düğmesine basmasıyla aynı şey.
+    await pageA.evaluate(() => (globalThis as any).__player.pause());
+
+    const bDurdu = await pageB.waitForFunction(
+      () => (globalThis as any).__sync()?.isPlaying === false,
+      { timeout: 10_000, polling: 200 },
+    ).then(() => true).catch(() => false);
+    assert(bDurdu, 'oynatıcıdan yapılan duraklatma karşı tarafa geçmedi');
+
+    const vSonra = Number(await readCell(pageB, 't-version'));
+    assert(vSonra > vOnce, `sürüm artmadı: ${vOnce} → ${vSonra}`);
+    return `v${vOnce} → v${vSonra}, B de durdu`;
+  });
+
+  await check('Oynatıcıdan atlama odaya yayılıyor', async () => {
+    if (!youtubeReady) throw new SkipError('YouTube oynatıcısı bu ortamda hazır değil');
+    if (!await oynaticiHazir(pageA)) throw new SkipError('oynatıcı hazır olmadı (dış kaynak)');
+
+    // Telemetri hücresi "0:12.345" biçiminde; `parseMs` "123 ms" bekliyor ve
+    // NaN döndürüyordu. Sayıyı kancadan ham olarak alıyoruz.
+    const hedef = (p: Page) => p.evaluate(() => (globalThis as any).__sync()?.targetMs as number | null);
+    const hedefOnce = await hedef(pageB);
+    assert(typeof hedefOnce === 'number', 'B hedef pozisyonu okunamadı');
+
+    await pageA.evaluate(() => {
+      const p = (globalThis as any).__player;
+      p.seek(p.position() + 40_000);
+    });
+
+    const bAtladi = await pageB.waitForFunction(
+      (esik: number) => {
+        const s = (globalThis as any).__sync();
+        return s?.targetMs != null && s.targetMs > esik;
+      },
+      { timeout: 10_000, polling: 200 },
+      hedefOnce + 25_000,
+    ).then(() => true).catch(() => false);
+
+    const hedefSonra = await hedef(pageB);
+    if (!bAtladi) {
+      // A komutu hiç yolladı mı, yoksa B mi almadı? Sürüm bunu ayırır.
+      const tani = await Promise.all([
+        pageA.evaluate(() => JSON.stringify({
+          v: (globalThis as any).__sync()?.version,
+          hedef: Math.round((globalThis as any).__sync()?.targetMs ?? -1),
+          konum: Math.round((globalThis as any).__player.position()),
+          oynuyor: (globalThis as any).__player.playing(),
+          yt: (globalThis as any).__stage().ytState,
+        })),
+        pageB.evaluate(() => (globalThis as any).__sync()?.version),
+      ]);
+      throw new Error(
+        `B atlamayı görmedi: ${Math.round(hedefOnce)}ms → ${Math.round(hedefSonra ?? NaN)}ms · A ${tani[0]} · B v${tani[1]}`,
+      );
+    }
+    return `B ${Math.round(hedefOnce / 1000)}sn → ${Math.round((hedefSonra ?? 0) / 1000)}sn`;
+  });
+
   await check('Sohbet A → B ulaşıyor', async () => {
     const text = `tarayici-testi-${Date.now()}`;
     await typeInto(pageA, '#chat-input', text);
@@ -894,6 +1006,12 @@ try {
         assert(kare >= 5, `arka plandaki oda dondu: 24 kaydırmaya karşılık ${kare} kare`);
         return `arka plandaki oda ${kare} kare üretti`;
       } finally {
+        // Sunucudaki sekmeyi de kapat. Yalnızca sayfayı kapatmak yetmiyor:
+        // oturum 120 saniye boşta bekliyor ve paketi arka arkaya koşunca
+        // `BROWSER_MAX_SESSIONS` tavanı doluyor, sonraki koşumda ortak
+        // tarayıcı hiç açılmıyordu.
+        await pageC.evaluate(() => document.getElementById('btn-browser')?.click()).catch(() => {});
+        await sleep(500);
         await pageC.close().catch(() => {});
       }
     });
